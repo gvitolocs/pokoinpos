@@ -98,5 +98,8 @@ func (l *Ledger) InitializeFromGenesis(genesis *GenesisMetaData) {
 	defer l.lock.Unlock()
 	for account, amount := range genesis.InitialBalances {
 		l.Accounts[account] = amount
+		if amount > 0 {
+			l.Validators[account] = true
+		}
 	}
 }

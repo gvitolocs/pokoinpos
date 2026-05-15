@@ -15,6 +15,7 @@ const BLOCK_TYPE = "block"
 const NO_PARENT_HASH = "" // The hahs of the genesis block's parent (i.e., none as it has no parent).
 const MINER_BLOCK_REWARD = 10
 const LOTTERY_DRAW_RANGE = 1_000_000_000_000 // 10^12
+const VALIDATOR_TICKET_WEIGHT = 1_000_000
 
 type Block struct {
 	Type            string // Tuple type: The text "block".
@@ -224,7 +225,10 @@ func (b *Blockchain) AddBlock(block *Block) bool {
 	if err != nil {
 		return false
 	}
-	tickets := genesis.InitialBalances[block.VerificationKey]
+	// Any P2P node with a valid miner key can validate. Once a miner appears in
+	// the chain, it stays in the validator registry independently of balance.
+	parentLedger := buildLedgerAtHash(nodes, block.ParentHash)
+	tickets := parentLedger.LotteryTickets(block.VerificationKey)
 	if tickets <= 0 {
 		return false
 	}
@@ -237,7 +241,7 @@ func (b *Blockchain) AddBlock(block *Block) bool {
 	}
 
 	// Validate transactions against parent state.
-	ledger := buildLedgerAtHash(nodes, block.ParentHash)
+	ledger := parentLedger
 	txs, err := DecodeBlockTransactions(block.MetaData)
 	if err != nil {
 		return false
@@ -251,6 +255,7 @@ func (b *Blockchain) AddBlock(block *Block) bool {
 		}
 	}
 	// Apply miner reward after all txs are valid.
+	ledger.MarkValidator(block.VerificationKey)
 	ledger.Accounts[block.VerificationKey] += MINER_BLOCK_REWARD
 
 	b.Blocks = append(b.Blocks, *block)
@@ -470,6 +475,7 @@ func buildLedgerFromBlocks(blocks []*Block) *Ledger {
 
 	for i := 1; i < len(blocks); i++ {
 		block := blocks[i]
+		ledger.MarkValidator(block.VerificationKey)
 		txs, err := DecodeBlockTransactions(block.MetaData)
 		if err != nil {
 			continue

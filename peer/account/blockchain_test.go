@@ -70,7 +70,7 @@ func TestAddBlockAppliesTransactionsAndRewards(t *testing.T) {
 	miner, _ := NewAccount()
 	from, _ := NewAccount()
 	to, _ := NewAccount()
-	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner, from, to}, 1_000_000, 1_000_000, 42)
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner, from, to}, 1_000_000, 1_000_000_000, 42)
 	chain := NewBlockchainWithGenesis(genesis)
 
 	tx := NewSignedTransaction("tx-1", from, to.SafeEncode(), 10)
@@ -100,7 +100,7 @@ func TestAddBlockRejectsInvalidTransaction(t *testing.T) {
 	miner, _ := NewAccount()
 	from, _ := NewAccount()
 	to, _ := NewAccount()
-	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner, from, to}, 1_000_000, 1_000_000, 42)
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner, from, to}, 1_000_000, 1_000_000_000, 42)
 	chain := NewBlockchainWithGenesis(genesis)
 
 	// Invalid due to overdraft.
@@ -124,7 +124,7 @@ func TestAddBlockRejectsInvalidTransaction(t *testing.T) {
 func TestMintTransactionCreditsReceiverWithoutDebitingMiner(t *testing.T) {
 	miner, _ := NewAccount()
 	to, _ := NewAccount()
-	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner}, 1_000_000, 1_000_000, 42)
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner}, 1_000_000, 1_000_000_000, 42)
 	chain := NewBlockchainWithGenesis(genesis)
 
 	tx := NewMintTransaction("mint-1", miner, to.SafeEncode(), 2_000_000)
@@ -140,5 +140,81 @@ func TestMintTransactionCreditsReceiverWithoutDebitingMiner(t *testing.T) {
 	}
 	if got := ledger.Accounts[miner.SafeEncode()]; got != 1_000_000+MINER_BLOCK_REWARD {
 		t.Fatalf("wrong miner balance: got %d", got)
+	}
+}
+
+func TestValidatorCanMineWithoutGenesisStakeOrBalance(t *testing.T) {
+	genesisMiner, _ := NewAccount()
+	newValidator, _ := NewAccount()
+
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{genesisMiner}, 1_000_000, 1_000_000_000, 42)
+	chain := NewBlockchainWithGenesis(genesis)
+
+	candidate := NewCandidateBlock(newValidator, 1, chain.BestLeafHash(), nil, genesis.Seed)
+	if ok := chain.AddBlock(candidate); !ok {
+		t.Fatal("expected P2P validator to mine without genesis stake or balance")
+	}
+}
+
+func TestValidatorCanWithdrawAllAndRemainAuthorized(t *testing.T) {
+	genesisMiner, _ := NewAccount()
+	newValidator, _ := NewAccount()
+
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{genesisMiner}, 2_000_000, 1_000_000_000, 42)
+	chain := NewBlockchainWithGenesis(genesis)
+
+	fundingTx := NewMintTransaction("fund-validator", genesisMiner, newValidator.SafeEncode(), 1_000_000)
+	fundingBlock := NewCandidateBlock(genesisMiner, 1, chain.BestLeafHash(), []SignedTransaction{*fundingTx}, genesis.Seed)
+	if ok := chain.AddBlock(fundingBlock); !ok {
+		t.Fatal("expected funding block to be accepted")
+	}
+
+	withdrawTx := NewSignedTransaction("withdraw-all", newValidator, "0x1111111111111111111111111111111111111111", 1_000_000)
+	withdrawBlock := NewCandidateBlock(newValidator, 2, chain.BestLeafHash(), []SignedTransaction{*withdrawTx}, genesis.Seed)
+	if ok := chain.AddBlock(withdrawBlock); !ok {
+		t.Fatal("expected full withdraw block to be accepted")
+	}
+
+	ledger := LedgerFromBlockchain(chain, 0)
+	if got := ledger.GetBalance(newValidator.SafeEncode()); got != MINER_BLOCK_REWARD {
+		t.Fatalf("validator should retain only block reward after full withdrawal, got %d", got)
+	}
+	if !ledger.IsValidator(newValidator.SafeEncode()) {
+		t.Fatal("validator should remain authorized after withdrawing spendable balance")
+	}
+}
+
+func TestLotteryTicketsCapsWhaleAtNinetySevenPercent(t *testing.T) {
+	whale, _ := NewAccount()
+	zeroValidator, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{whale}, 1_000_000, 1_000_000, 42)
+	ledger := MakeLedger()
+	ledger.InitializeFromGenesis(genesis)
+	ledger.MarkValidator(zeroValidator.SafeEncode())
+
+	whaleTickets := ledger.LotteryTickets(whale.SafeEncode())
+	zeroTickets := ledger.LotteryTickets(zeroValidator.SafeEncode())
+	total := whaleTickets + zeroTickets
+
+	if got := whaleTickets * 100 / total; got != 97 {
+		t.Fatalf("whale share got %d%% want 97%%", got)
+	}
+	if got := zeroTickets * 100 / total; got != 3 {
+		t.Fatalf("zero-validator share got %d%% want 3%%", got)
+	}
+}
+
+func TestLotteryTicketsSharesZeroValidatorPool(t *testing.T) {
+	whale, _ := NewAccount()
+	zeroA, _ := NewAccount()
+	zeroB, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{whale}, 1_000_000, 1_000_000, 42)
+	ledger := MakeLedger()
+	ledger.InitializeFromGenesis(genesis)
+	ledger.MarkValidator(zeroA.SafeEncode())
+	ledger.MarkValidator(zeroB.SafeEncode())
+
+	if gotA, gotB := ledger.LotteryTickets(zeroA.SafeEncode()), ledger.LotteryTickets(zeroB.SafeEncode()); gotA != gotB {
+		t.Fatalf("zero-validator tickets should split evenly: %d vs %d", gotA, gotB)
 	}
 }

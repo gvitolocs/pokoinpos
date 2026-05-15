@@ -24,7 +24,7 @@ func TestHandleRPCSendRawTransaction(t *testing.T) {
 
 	peer := NewPeer(43099)
 	miner, _ := account.NewAccount()
-	genesis := account.MakeGenesisMetaDataFromAccounts([]*account.Account{miner}, 1_000_000, 1_000_000, 42)
+	genesis := account.MakeGenesisMetaDataFromAccounts([]*account.Account{miner}, 1_000_000, 1_000_000_000, 42)
 	genesis.InitialBalances[strings.ToLower(from.Hex())] = 100
 	peer.ConfigurePoS(genesis, miner)
 
