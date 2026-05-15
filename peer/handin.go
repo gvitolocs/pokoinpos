@@ -208,12 +208,15 @@ func runNode(cfg NodeConfig) {
 			cfg.GenesisHardness,
 			cfg.GenesisSeed,
 		)
+		for address, amount := range cfg.EVMGenesisAlloc {
+			genesis.InitialBalances[address] = amount
+		}
 		peer.ConfigurePoS(genesis, miner)
 	}
 	peer.StartWithConnection(cfg.JoinHost, cfg.JoinPort)
 
 	go func() {
-		if err := StartOpsServer(cfg.OpsAddr, peer, cfg.AdminToken); err != nil {
+		if err := StartOpsServer(cfg.OpsAddr, peer, cfg.AdminToken, cfg.EVMChainID, cfg.EVMNetworkID); err != nil {
 			logEvent("ops_server_stopped", map[string]any{"error": err.Error()})
 			os.Exit(1)
 		}
@@ -249,6 +252,9 @@ func runNode(cfg NodeConfig) {
 		"genesisHardness": cfg.GenesisHardness,
 		"genesisSeed":     cfg.GenesisSeed,
 		"finalityDepth":   cfg.FinalityDepth,
+		"evmChainID":      cfg.EVMChainID,
+		"evmNetworkID":    cfg.EVMNetworkID,
+		"evmAllocCount":   len(cfg.EVMGenesisAlloc),
 		"joinHost":        cfg.JoinHost,
 		"joinPort":        cfg.JoinPort,
 		"stateDir":        cfg.StateDir,

@@ -3,13 +3,18 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
+	"peer/account"
 	"strconv"
+	"strings"
 )
 
 type OpsServer struct {
-	peer       *Peer
-	adminToken string
+	peer         *Peer
+	adminToken   string
+	evmChainID   int64
+	evmNetworkID string
 }
 
 type EndpointDescription struct {
@@ -23,14 +28,34 @@ type EndpointDescription struct {
 	UseCases       []string `json:"useCases,omitempty"`
 }
 
-func StartOpsServer(addr string, peer *Peer, adminToken string) error {
-	srv := &OpsServer{peer: peer, adminToken: adminToken}
+type JSONRPCRequest struct {
+	JSONRPC string            `json:"jsonrpc"`
+	ID      any               `json:"id,omitempty"`
+	Method  string            `json:"method"`
+	Params  []json.RawMessage `json:"params,omitempty"`
+}
+
+type JSONRPCResponse struct {
+	JSONRPC string        `json:"jsonrpc"`
+	ID      any           `json:"id,omitempty"`
+	Result  any           `json:"result,omitempty"`
+	Error   *JSONRPCError `json:"error,omitempty"`
+}
+
+type JSONRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64, evmNetworkID string) error {
+	srv := &OpsServer{peer: peer, adminToken: adminToken, evmChainID: evmChainID, evmNetworkID: evmNetworkID}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", srv.health)
 	mux.HandleFunc("/ready", srv.ready)
 	mux.HandleFunc("/chain/status", srv.chainStatus)
 	mux.HandleFunc("/metrics", srv.metrics)
 	mux.HandleFunc("/endpoints", srv.endpoints)
+	mux.HandleFunc("/rpc", srv.rpc)
 	mux.HandleFunc("/admin/mine", srv.mineSlot)
 	logEvent("ops_server_starting", map[string]any{"addr": addr})
 	return http.ListenAndServe(addr, mux)
@@ -92,6 +117,15 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 			},
 			{
 				Method:         http.MethodPost,
+				Path:           "/rpc",
+				Summary:        "EVM-style JSON-RPC compatibility endpoint for MetaMask-style wallets.",
+				Authentication: "none",
+				ContentType:    "application/json",
+				ResponseFields: []string{"jsonrpc", "id", "result", "error"},
+				UseCases:       []string{"MetaMask custom network", "EVM wallet network detection", "read-only PK balance checks"},
+			},
+			{
+				Method:         http.MethodPost,
 				Path:           "/admin/mine",
 				Summary:        "Manually mine a requested slot; intended for controlled operations and smoke tests.",
 				Authentication: "Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
@@ -102,6 +136,178 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	})
+}
+
+func (s *OpsServer) rpc(w http.ResponseWriter, r *http.Request) {
+	setRPCHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	var req JSONRPCRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"jsonrpc": "2.0",
+			"error":   JSONRPCError{Code: -32700, Message: "parse error"},
+		})
+		return
+	}
+	if req.JSONRPC == "" {
+		req.JSONRPC = "2.0"
+	}
+	result, rpcErr := s.handleRPC(req)
+	response := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      req.ID,
+	}
+	if rpcErr != nil {
+		response["error"] = rpcErr
+	} else {
+		response["result"] = result
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func setRPCHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+func (s *OpsServer) handleRPC(req JSONRPCRequest) (any, *JSONRPCError) {
+	switch req.Method {
+	case "web3_clientVersion":
+		return "PokoinPoS/v0.1.0", nil
+	case "net_version":
+		return s.evmNetworkID, nil
+	case "eth_chainId":
+		return hexQuantity(big.NewInt(s.evmChainID)), nil
+	case "eth_blockNumber":
+		return hexQuantity(big.NewInt(int64(s.peer.ChainHeight()))), nil
+	case "eth_syncing":
+		return false, nil
+	case "eth_accounts":
+		return []string{}, nil
+	case "eth_requestAccounts":
+		return []string{}, nil
+	case "eth_getBalance":
+		if len(req.Params) < 1 {
+			return nil, &JSONRPCError{Code: -32602, Message: "eth_getBalance requires address"}
+		}
+		var address string
+		if err := json.Unmarshal(req.Params[0], &address); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid address"}
+		}
+		return hexQuantity(big.NewInt(int64(s.peer.BalanceOf(strings.ToLower(address))))), nil
+	case "eth_getTransactionCount":
+		if len(req.Params) < 1 {
+			return nil, &JSONRPCError{Code: -32602, Message: "eth_getTransactionCount requires address"}
+		}
+		var address string
+		if err := json.Unmarshal(req.Params[0], &address); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid address"}
+		}
+		return hexQuantity(new(big.Int).SetUint64(s.peer.NonceOf(strings.ToLower(address)))), nil
+	case "eth_getCode":
+		return "0x", nil
+	case "eth_getTransactionByHash":
+		if len(req.Params) < 1 {
+			return nil, &JSONRPCError{Code: -32602, Message: "eth_getTransactionByHash requires hash"}
+		}
+		var hash string
+		if err := json.Unmarshal(req.Params[0], &hash); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid hash"}
+		}
+		tx, exists := s.peer.TransactionByID(strings.ToLower(hash))
+		if !exists {
+			return nil, nil
+		}
+		return evmTransactionObject(tx), nil
+	case "eth_getTransactionReceipt":
+		if len(req.Params) < 1 {
+			return nil, &JSONRPCError{Code: -32602, Message: "eth_getTransactionReceipt requires hash"}
+		}
+		var hash string
+		if err := json.Unmarshal(req.Params[0], &hash); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid hash"}
+		}
+		tx, exists := s.peer.TransactionByID(strings.ToLower(hash))
+		if !exists {
+			return nil, nil
+		}
+		return map[string]any{
+			"transactionHash":   tx.ID,
+			"transactionIndex":  "0x0",
+			"blockHash":         "0x0",
+			"blockNumber":       hexQuantity(big.NewInt(int64(s.peer.ChainHeight()))),
+			"from":              tx.From,
+			"to":                tx.To,
+			"cumulativeGasUsed": "0x5208",
+			"gasUsed":           "0x5208",
+			"contractAddress":   nil,
+			"logs":              []any{},
+			"status":            "0x1",
+		}, nil
+	case "eth_mining":
+		return false, nil
+	case "eth_hashrate":
+		return "0x0", nil
+	case "eth_gasPrice":
+		return "0x0", nil
+	case "eth_estimateGas":
+		return "0x5208", nil
+	case "eth_sendRawTransaction":
+		if len(req.Params) < 1 {
+			return nil, &JSONRPCError{Code: -32602, Message: "eth_sendRawTransaction requires raw transaction"}
+		}
+		var raw string
+		if err := json.Unmarshal(req.Params[0], &raw); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid raw transaction"}
+		}
+		tx, err := account.NewEVMTransaction(raw, s.evmChainID)
+		if err != nil {
+			return nil, &JSONRPCError{Code: -32000, Message: err.Error()}
+		}
+		if s.peer.NonceOf(tx.From) != tx.Nonce {
+			return nil, &JSONRPCError{Code: -32000, Message: "invalid nonce"}
+		}
+		if s.peer.BalanceOf(tx.From) < tx.Amount {
+			return nil, &JSONRPCError{Code: -32000, Message: "insufficient funds"}
+		}
+		s.peer.FloodPoSTransaction(tx)
+		return tx.ID, nil
+	case "eth_sendTransaction":
+		return nil, &JSONRPCError{Code: -32000, Message: "eth_sendTransaction requires an unlocked node account; use wallet-signed eth_sendRawTransaction"}
+	default:
+		return nil, &JSONRPCError{Code: -32601, Message: "method not found"}
+	}
+}
+
+func hexQuantity(value *big.Int) string {
+	if value == nil || value.Sign() == 0 {
+		return "0x0"
+	}
+	return "0x" + value.Text(16)
+}
+
+func evmTransactionObject(tx account.SignedTransaction) map[string]any {
+	return map[string]any{
+		"hash":             tx.ID,
+		"nonce":            hexQuantity(new(big.Int).SetUint64(tx.Nonce)),
+		"blockHash":        nil,
+		"blockNumber":      nil,
+		"transactionIndex": nil,
+		"from":             tx.From,
+		"to":               tx.To,
+		"value":            hexQuantity(big.NewInt(int64(tx.Amount))),
+		"gas":              "0x5208",
+		"gasPrice":         "0x0",
+		"input":            "0x",
+	}
 }
 
 func (s *OpsServer) health(w http.ResponseWriter, r *http.Request) {

@@ -107,9 +107,11 @@ Operational endpoints:
 - `GET /chain/status`
 - `GET /metrics`
 - `GET /endpoints`
+- `POST /rpc` (EVM-style JSON-RPC compatibility for MetaMask-style wallets)
 - `POST /admin/mine?slot=<n>` (requires `Authorization: Bearer <token>`)
 
 See `docs/node-endpoints.md` for the full endpoint catalog and website health page integration notes.
+See `docs/wallet-compatibility.md` for MetaMask custom network setup.
 
 With `POKOINPOS_FINALITY_DEPTH=1`, state-machine execution is based on finalized blocks
 (best chain minus one tentative tip), aligning total-order application with ADNO11 Chapter 14/16 style.

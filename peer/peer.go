@@ -711,6 +711,33 @@ func (p *Peer) TxHistoryCount() int {
 	return p.ledger.TxCount()
 }
 
+func (p *Peer) BalanceOf(accountName string) int {
+	if p.ledger == nil {
+		return 0
+	}
+	return p.ledger.GetBalance(accountName)
+}
+
+func (p *Peer) NonceOf(accountName string) uint64 {
+	if p.ledger == nil {
+		return 0
+	}
+	return p.ledger.GetNonce(accountName)
+}
+
+func (p *Peer) TransactionByID(txID string) (account.SignedTransaction, bool) {
+	if p.ledger != nil {
+		accounts := p.ledger.CopyTransactions()
+		if tx, exists := accounts[txID]; exists {
+			return tx, true
+		}
+	}
+	p.mempoolLock.Lock()
+	defer p.mempoolLock.Unlock()
+	tx, exists := p.mempool[txID]
+	return tx, exists
+}
+
 func (p *Peer) Ready() bool {
 	return p.blockchain != nil && p.genesis != nil && p.miner != nil
 }

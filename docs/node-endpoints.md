@@ -140,6 +140,46 @@ Example:
 curl http://127.0.0.1:8080/endpoints
 ```
 
+### `POST /rpc`
+
+EVM-style JSON-RPC compatibility endpoint for MetaMask-style wallets.
+
+Authentication: none.
+
+Supported wallet methods include:
+
+- `web3_clientVersion`
+- `net_version`
+- `eth_chainId`
+- `eth_blockNumber`
+- `eth_syncing`
+- `eth_accounts`
+- `eth_requestAccounts`
+- `eth_getBalance`
+- `eth_getTransactionCount`
+- `eth_getCode`
+- `eth_getTransactionByHash`
+- `eth_getTransactionReceipt`
+- `eth_mining`
+- `eth_hashrate`
+- `eth_gasPrice`
+- `eth_estimateGas`
+- `eth_sendRawTransaction`
+
+`eth_sendTransaction` returns a JSON-RPC error because PokoinPoS does not unlock node-held Ethereum accounts. Wallets should sign locally and submit through `eth_sendRawTransaction`.
+
+- `eth_sendTransaction`
+
+See `docs/wallet-compatibility.md` for MetaMask setup values.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8080/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
+```
+
 ## Admin Endpoints
 
 ### `POST /admin/mine?slot=<n>`

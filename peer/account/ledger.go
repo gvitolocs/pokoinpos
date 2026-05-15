@@ -6,6 +6,7 @@ import (
 
 type Ledger struct {
 	Accounts map[string]int
+	Nonces   map[string]uint64
 	lock     sync.Mutex
 	// Array of transactions perfomed on this ledger.
 	TxHistory map[string]SignedTransaction
@@ -14,6 +15,7 @@ type Ledger struct {
 func MakeLedger() *Ledger {
 	ledger := new(Ledger)
 	ledger.Accounts = make(map[string]int)
+	ledger.Nonces = make(map[string]uint64)
 	ledger.TxHistory = make(map[string]SignedTransaction)
 	return ledger
 }
@@ -48,6 +50,22 @@ func (l *Ledger) GetBalance(account string) int {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	return l.Accounts[account]
+}
+
+func (l *Ledger) GetNonce(account string) uint64 {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	return l.Nonces[account]
+}
+
+func (l *Ledger) CopyTransactions() map[string]SignedTransaction {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	out := make(map[string]SignedTransaction, len(l.TxHistory))
+	for id, tx := range l.TxHistory {
+		out[id] = tx
+	}
+	return out
 }
 
 func (l *Ledger) TxCount() int {

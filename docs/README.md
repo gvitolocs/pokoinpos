@@ -6,6 +6,7 @@ This project is a blockchain-powered POS platform. The documentation in this fol
 
 - `api/endpoints.md`: REST API endpoints, request/response models, and webhook contracts.
 - `node-endpoints.md`: Live PokoinPoS node endpoints for health pages, monitoring, and admin smoke tests.
+- `wallet-compatibility.md`: MetaMask-style wallet setup, JSON-RPC compatibility, and next steps for full transaction support.
 - `integrations/wallets.md`: Wallet connection patterns for browser, mobile, and server-side verification.
 - `integrations/shop-pos.md`: Shop onboarding, POS payment flow, refunds, and settlement.
 - `operations/security-compliance.md`: Security baseline, key management, fraud controls, and compliance requirements.
