@@ -15,8 +15,8 @@ Use these values when adding the network manually:
 - Network name: `PokoinPoS`
 - RPC URL: `https://<your-node-domain>/rpc`
 - Chain ID: `26062026`
-- Currency symbol: `PK`
-- Block explorer URL: leave empty for now
+- Currency symbol: `PKN`
+- Block explorer URL: `https://explorer.pokoin.com`
 
 For a local node:
 
@@ -46,6 +46,10 @@ The current compatibility endpoint supports:
 - `eth_getCode`
 - `eth_getTransactionByHash`
 - `eth_getTransactionReceipt`
+- `eth_getBlockTransactionCountByNumber`
+- `eth_getBlockTransactionCountByHash`
+- `eth_getTransactionByBlockNumberAndIndex`
+- `eth_getTransactionByBlockHashAndIndex`
 - `eth_mining`
 - `eth_hashrate`
 - `eth_gasPrice`
@@ -56,7 +60,7 @@ The current compatibility endpoint supports:
 
 ## Funding EVM Wallets
 
-MetaMask accounts use Ethereum-style `0x...` addresses. To give an EVM wallet PK at chain start, configure deterministic genesis allocation on every peer before first boot:
+MetaMask accounts use Ethereum-style `0x...` addresses. To give an EVM wallet PKN at chain start, configure deterministic genesis allocation on every peer before first boot:
 
 ```env
 POKOINPOS_EVM_GENESIS_ALLOC=0xabc...:1000000,0xdef...:500000
@@ -72,8 +76,8 @@ MetaMask signs an Ethereum transaction locally. The node then:
 2. recovers the secp256k1 signer address,
 3. verifies the chain ID,
 4. checks the sender nonce,
-5. checks the sender PK balance,
-6. maps `value` to native PK amount,
+5. checks the sender PKN balance,
+6. maps `value` to native PKN amount,
 7. inserts the self-verifying transaction into the PoS mempool,
 8. includes it in the next valid PoS block.
 
@@ -91,7 +95,7 @@ Wallets can:
 - submit signed transfers through `eth_sendRawTransaction`,
 - poll transaction objects and receipts.
 
-This is enough for PK value transfers from MetaMask-style wallets. Smart contract execution and ERC-20 contracts are not implemented yet.
+This is enough for PKN value transfers from MetaMask-style wallets. Smart contract execution and ERC-20 contracts are not implemented yet.
 
 ## What Comes Next
 

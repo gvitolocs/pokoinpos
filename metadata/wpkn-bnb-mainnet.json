@@ -1,0 +1,16 @@
+{
+  "chainId": 56,
+  "network": "bnb-mainnet",
+  "contractName": "WrappedPKN",
+  "name": "Wrapped PKN",
+  "symbol": "wPKN",
+  "decimals": 18,
+  "address": "0x91A17E2bddfF839078BD395482B38e4AC15276f4",
+  "owner": "0x74466c3a204429B22CE8558F3F18f3C59F67fCB3",
+  "initialRecipient": "0x74466c3a204429B22CE8558F3F18f3C59F67fCB3",
+  "initialMint": "2000000",
+  "maxBackedSupply": "2000000",
+  "deployer": "0x74466c3a204429B22CE8558F3F18f3C59F67fCB3",
+  "deploymentTxHash": "0xe7d0bd3787a134e82c2477efe26a18f58d2322ef84ba10003bea4befa54a0c90",
+  "deployedAt": "2026-05-15T14:31:31.165Z"
+}

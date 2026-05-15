@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">PokoinPoS</title>
+  <rect width="256" height="256" rx="56" fill="#0f172a"/>
+  <circle cx="128" cy="128" r="84" fill="#9cff6e"/>
+  <path d="M89 174V82h47c21 0 36 14 36 34s-15 34-36 34h-19v24H89Zm28-48h17c7 0 12-4 12-10s-5-10-12-10h-17v20Z" fill="#0f172a"/>
+</svg>

@@ -21,7 +21,7 @@ Authentication: none.
 Response fields:
 
 - `status`: node liveness status, currently `ok`.
-- `currencySymbol`: native currency symbol, currently `PK`.
+- `currencySymbol`: native currency symbol, currently `PKN`.
 - `peerCount`: number of connected peers.
 - `chainHeight`: current best-chain height.
 - `committedHeight`: height considered finalized after `finalityDepth`.
@@ -63,7 +63,7 @@ Authentication: none.
 
 Response fields:
 
-- `currencySymbol`: native currency symbol, currently `PK`.
+- `currencySymbol`: native currency symbol, currently `PKN`.
 - `height`: current best-chain height.
 - `committedHeight`: height considered finalized after `finalityDepth`.
 - `finalityDepth`: number of tentative tip blocks excluded from committed state.
@@ -120,7 +120,7 @@ Authentication: none.
 Response fields:
 
 - `service`: service name, currently `pokoinpos-node`.
-- `currency`: native currency symbol, currently `PK`.
+- `currency`: native currency symbol, currently `PKN`.
 - `endpoints`: list of endpoint metadata.
 
 Each endpoint entry includes:
@@ -171,6 +171,7 @@ Supported wallet methods include:
 - `eth_sendTransaction`
 
 See `docs/wallet-compatibility.md` for MetaMask setup values.
+See `docs/explorer-api.md` for block explorer endpoints.
 
 Example:
 

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PokoinPoS Explorer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">PokoinPoS Explorer</p>
+          <h1>PKN public chain explorer</h1>
+          <p class="muted">Blocks, transactions, addresses, and public network metadata for PokoinPoS.</p>
+        </div>
+        <form id="search-form" class="search">
+          <input id="search-input" placeholder="Search block, tx hash, or address" />
+          <button type="submit">Search</button>
+        </form>
+      </header>
+
+      <section class="cards">
+        <article>
+          <span>Height</span>
+          <strong id="height">-</strong>
+        </article>
+        <article>
+          <span>Committed</span>
+          <strong id="committed">-</strong>
+        </article>
+        <article>
+          <span>Transactions</span>
+          <strong id="tx-count">-</strong>
+        </article>
+        <article>
+          <span>Mempool</span>
+          <strong id="mempool">-</strong>
+        </article>
+      </section>
+
+      <section id="result" class="panel hidden"></section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-title">
+            <h2>Latest Blocks</h2>
+            <button id="refresh">Refresh</button>
+          </div>
+          <div id="blocks" class="list"></div>
+        </article>
+        <article class="panel">
+          <h2>Network</h2>
+          <dl class="facts">
+            <dt>Name</dt><dd>PokoinPoS</dd>
+            <dt>RPC</dt><dd><code>https://rpc.pokoin.com/rpc</code></dd>
+            <dt>Chain ID</dt><dd><code>26062026</code></dd>
+            <dt>Symbol</dt><dd><code>PKN</code></dd>
+            <dt>Explorer API</dt><dd><code>/explorer/*</code></dd>
+          </dl>
+        </article>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -15,6 +15,9 @@ type NodeConfig struct {
 	OpsAddr                  string
 	AdminToken               string
 	SlotSeconds              int
+	BaseMineAttemptsPerTick  int
+	MaxMineAttemptsPerTick   int
+	MineAttemptsPerPendingTx int
 	GenesisHardness          int
 	GenesisSeed              int
 	InitialBalance           int
@@ -29,13 +32,25 @@ type NodeConfig struct {
 
 func LoadNodeConfigFromEnv() (NodeConfig, error) {
 	cfg := NodeConfig{
-		RunMode:         envOrDefault("POKOINPOS_RUN_MODE", "demo"),
-		ListenPort:      envIntOrDefault("POKOINPOS_LISTEN_PORT", 43000),
-		JoinHost:        envOrDefault("POKOINPOS_JOIN_HOST", "127.0.0.1"),
-		JoinPort:        envIntOrDefault("POKOINPOS_JOIN_PORT", -1),
-		OpsAddr:         envOrDefault("POKOINPOS_OPS_ADDR", ":8080"),
-		AdminToken:      envOrDefault("POKOINPOS_ADMIN_TOKEN", ""),
-		SlotSeconds:     envIntOrDefault("POKOINPOS_SLOT_SECONDS", 1),
+		RunMode:     envOrDefault("POKOINPOS_RUN_MODE", "demo"),
+		ListenPort:  envIntOrDefault("POKOINPOS_LISTEN_PORT", 43000),
+		JoinHost:    envOrDefault("POKOINPOS_JOIN_HOST", "127.0.0.1"),
+		JoinPort:    envIntOrDefault("POKOINPOS_JOIN_PORT", -1),
+		OpsAddr:     envOrDefault("POKOINPOS_OPS_ADDR", ":8080"),
+		AdminToken:  envOrDefault("POKOINPOS_ADMIN_TOKEN", ""),
+		SlotSeconds: envIntOrDefault("POKOINPOS_SLOT_SECONDS", 1),
+		BaseMineAttemptsPerTick: envIntOrDefault(
+			"POKOINPOS_BASE_MINE_ATTEMPTS_PER_TICK",
+			1,
+		),
+		MaxMineAttemptsPerTick: envIntOrDefault(
+			"POKOINPOS_MAX_MINE_ATTEMPTS_PER_TICK",
+			envIntOrDefault("POKOINPOS_MINE_ATTEMPTS_PER_TICK", 100),
+		),
+		MineAttemptsPerPendingTx: envIntOrDefault(
+			"POKOINPOS_MINE_ATTEMPTS_PER_PENDING_TX",
+			100,
+		),
 		GenesisHardness: envIntOrDefault("POKOINPOS_GENESIS_HARDNESS", 10000),
 		GenesisSeed:     envIntOrDefault("POKOINPOS_GENESIS_SEED", 42),
 		InitialBalance:  envIntOrDefault("POKOINPOS_INITIAL_BALANCE", 1000000),
@@ -61,6 +76,15 @@ func LoadNodeConfigFromEnv() (NodeConfig, error) {
 	}
 	if cfg.SlotSeconds <= 0 {
 		return cfg, fmt.Errorf("POKOINPOS_SLOT_SECONDS must be > 0")
+	}
+	if cfg.BaseMineAttemptsPerTick <= 0 {
+		return cfg, fmt.Errorf("POKOINPOS_BASE_MINE_ATTEMPTS_PER_TICK must be > 0")
+	}
+	if cfg.MaxMineAttemptsPerTick <= 0 {
+		return cfg, fmt.Errorf("POKOINPOS_MAX_MINE_ATTEMPTS_PER_TICK must be > 0")
+	}
+	if cfg.MineAttemptsPerPendingTx < 0 {
+		return cfg, fmt.Errorf("POKOINPOS_MINE_ATTEMPTS_PER_PENDING_TX must be >= 0")
 	}
 	if !strings.HasPrefix(cfg.OpsAddr, ":") && !strings.Contains(cfg.OpsAddr, ":") {
 		return cfg, fmt.Errorf("POKOINPOS_OPS_ADDR must be host:port or :port")

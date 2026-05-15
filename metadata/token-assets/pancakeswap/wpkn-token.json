@@ -1,0 +1,19 @@
+{
+  "name": "Wrapped PKN",
+  "symbol": "wPKN",
+  "address": "0x91A17E2bddfF839078BD395482B38e4AC15276f4",
+  "chainId": 56,
+  "decimals": 18,
+  "logoURI": "https://explorer.pokoin.com/wpkn/logo.png",
+  "tags": [
+    "wrapped",
+    "pkn"
+  ],
+  "extensions": {
+    "project": "PokoinPoS",
+    "website": "https://pokoin.com",
+    "explorer": "https://bscscan.com/token/0x91A17E2bddfF839078BD395482B38e4AC15276f4",
+    "reserve": "https://explorer.pokoin.com/wpkn-reserve.json",
+    "pair": "https://bscscan.com/address/0x86294c008542C2707B9f67e3E4BA2d03B7bF7451"
+  }
+}
