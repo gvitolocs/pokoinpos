@@ -155,16 +155,22 @@ func TestFloodMessage(t *testing.T) {
 
 	peer1.FloodNetwork(&Message{MsgID: "flood-001", From: peer1.id, Type: "Test-flood-message"})
 	timeout := time.After(5 * time.Second)
-	// Wait for each peer to receive the flood message twice (one from each other peer).
-	// NB: peer1 should not receive the message at all!
-	// NB: It is technically possible that peer3 receives from peer1 and peer2 before sending, but the chances are minimal
-	// when no order is implemented. Thus, this might need to be changed in the future.
-	expected := [4]chan Message{peer2.received, peer2.received, peer3.received, peer3.received}
-	for _, ch := range expected {
+	want := map[string]bool{
+		peer2.id: false,
+		peer3.id: false,
+	}
+	for !want[peer2.id] || !want[peer3.id] {
 		select {
-		case <-ch:
+		case msg := <-peer2.received:
+			if msg.MsgID == "flood-001" {
+				want[peer2.id] = true
+			}
+		case msg := <-peer3.received:
+			if msg.MsgID == "flood-001" {
+				want[peer3.id] = true
+			}
 		case <-timeout:
-			t.Errorf("Timed out waiting for message")
+			t.Fatalf("Timed out waiting for flood delivery: peer2=%v peer3=%v", want[peer2.id], want[peer3.id])
 		}
 	}
 }
