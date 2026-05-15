@@ -15,13 +15,13 @@ The project starts from the previous peer-to-peer flooding ledger and extends it
 
 Following the exercise specification, the implementation uses:
 
-- a genesis configuration with **10 initial accounts**, each with **1,000,000 AU**,
+- a genesis configuration with **10 initial accounts**, each with **1,000,000 PK**,
 - fixed `Hardness` and `Seed` for deterministic lottery checks,
 - one-second slots,
 - transaction validity rules (signature, positive amount, no overdraft),
 - block rewards:
-  - `+10 AU` per accepted block,
-  - `+1 AU` per transaction included in that block.
+  - `+10 PK` per accepted block,
+  - `+1 PK` per transaction included in that block.
 
 ## What was implemented
 
@@ -95,6 +95,7 @@ cd peer
 POKOINPOS_RUN_MODE=node \
 POKOINPOS_LISTEN_PORT=43000 \
 POKOINPOS_OPS_ADDR=:8080 \
+POKOINPOS_FINALITY_DEPTH=1 \
 POKOINPOS_ADMIN_TOKEN=change-me \
 go run .
 ```
@@ -105,7 +106,13 @@ Operational endpoints:
 - `GET /ready`
 - `GET /chain/status`
 - `GET /metrics`
+- `GET /endpoints`
 - `POST /admin/mine?slot=<n>` (requires `Authorization: Bearer <token>`)
+
+See `docs/node-endpoints.md` for the full endpoint catalog and website health page integration notes.
+
+With `POKOINPOS_FINALITY_DEPTH=1`, state-machine execution is based on finalized blocks
+(best chain minus one tentative tip), aligning total-order application with ADNO11 Chapter 14/16 style.
 
 ## One-command Docker deployment for future peers
 
@@ -142,6 +149,27 @@ docker compose --env-file deploy/env/peer2.env -f docker-compose.peer.yml ps
 curl http://127.0.0.1:8081/health
 ```
 
+## Automatic peer updates (no manual redeploy on each node)
+
+The compose file includes an updater service (`watchtower`) that polls Docker Hub and
+auto-restarts the peer when a newer image is published.
+
+Recommended workflow:
+
+1) Publish new image tag to Docker Hub from admin/release pipeline.
+2) Keep peers running with:
+
+```bash
+deploy/scripts/docker-peer-up.sh deploy/env/peer2.env
+```
+
+3) Peers auto-pull and restart within `POKOINPOS_UPDATE_INTERVAL_SECONDS`.
+
+Controls in env file:
+
+- `POKOINPOS_AUTO_UPDATE=true|false`
+- `POKOINPOS_UPDATE_INTERVAL_SECONDS=60`
+
 For a full production-style Docker deployment runbook (network/firewall/router guidance, reconnect behavior, and troubleshooting), see:
 
 - `docs/docker-hub-overview.md`
@@ -170,5 +198,5 @@ See `docs/operations/disaster-recovery.md` for full DR procedure and RTO/RPO tar
 
 ## Report
 
-- PDF: `reports/reportHI10.pdf`
-- Source: `reports/reportHI10.md`
+- PDF: `reports/report.pdf`
+- Source: `reports/report.md`

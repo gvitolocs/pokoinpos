@@ -46,6 +46,8 @@ type Peer struct {
 	// Mempool of valid txs waiting for inclusion in a block.
 	mempool     map[string]account.SignedTransaction
 	mempoolLock sync.Mutex
+	// Number of blocks to keep tentative before finalizing state-machine execution.
+	finalityDepth int
 	// Runtime counters for operations and observability.
 	startedAt      time.Time
 	acceptedBlocks atomic.Uint64
@@ -81,6 +83,7 @@ func NewPeer(listenport int) *Peer {
 	peer.ledger = account.MakeLedger()
 	peer.mempool = make(map[string]account.SignedTransaction)
 	peer.startedAt = time.Now().UTC()
+	peer.finalityDepth = 0
 	return peer
 }
 
@@ -90,7 +93,17 @@ func (p *Peer) ConfigurePoS(genesis *account.GenesisMetaData, miner *account.Acc
 	p.genesis = genesis
 	p.miner = miner
 	p.blockchain = account.NewBlockchainWithGenesis(genesis)
-	p.ledger = account.LedgerFromBlockchain(p.blockchain, 0)
+	p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
+}
+
+func (p *Peer) SetFinalityDepth(depth int) {
+	if depth < 0 {
+		depth = 0
+	}
+	p.finalityDepth = depth
+	if p.blockchain != nil {
+		p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
+	}
 }
 
 // Start a peer and try to connect to port.
@@ -479,7 +492,7 @@ func (p *Peer) ApplyBlock(block *account.Block) bool {
 	if !p.blockchain.AddBlock(block) {
 		return false
 	}
-	p.ledger = account.LedgerFromBlockchain(p.blockchain, 0)
+	p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
 	p.acceptedBlocks.Add(1)
 	txs, err := account.DecodeBlockTransactions(block.MetaData)
 	if err == nil {
@@ -499,7 +512,7 @@ func (p *Peer) FloodTransaction(tx *account.SignedTransaction) {
 		fmt.Println(err) // For testing. There should not be any way to make errors here in production code.
 	}
 	// We don't receive our own flood, so apply the transaction locally here too.
-	if p.ledger.HasRecordedTransaction(tx) { // Only use non-recorded messages. Prevent replay attacks.
+	if p.hasSeenMessage(tx.ID) { // Prevent replay independently from finality depth.
 		return
 	}
 	msg := &Message{Type: helpers.TRANSACTION_MESSAGE_TYPE, MsgID: tx.ID, From: p.id, Payload: payload}
@@ -565,7 +578,7 @@ func (p *Peer) handleBlock(msg *Message) bool {
 	}
 
 	// Rebuild ledger from best chain (simple and deterministic).
-	p.ledger = account.LedgerFromBlockchain(p.blockchain, 0)
+	p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
 	p.acceptedBlocks.Add(1)
 
 	// Remove included txs from mempool.
@@ -700,4 +713,23 @@ func (p *Peer) TxHistoryCount() int {
 
 func (p *Peer) Ready() bool {
 	return p.blockchain != nil && p.genesis != nil && p.miner != nil
+}
+
+func (p *Peer) FinalityDepth() int {
+	return p.finalityDepth
+}
+
+func (p *Peer) CommittedHeight() int {
+	height := p.ChainHeight()
+	if height <= p.finalityDepth {
+		return 0
+	}
+	return height - p.finalityDepth
+}
+
+func (p *Peer) hasSeenMessage(msgID string) bool {
+	p.floodingLock.Lock()
+	defer p.floodingLock.Unlock()
+	_, exists := p.msgHistory[msgID]
+	return exists
 }

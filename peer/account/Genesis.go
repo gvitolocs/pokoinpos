@@ -34,7 +34,7 @@ func makeGenesisMetaData() *GenesisMetaData {
 	g.Seed = BLOCKCHAIN_SEED
 	// Initialize map before createAccounts writes into it.
 	g.InitialBalances = make(map[string]int)
-	// Exercise 16.2: exactly ten initial accounts with 10^6 AU each.
+	// Exercise 16.2: exactly ten initial accounts with 10^6 PK each.
 	createAccounts(g, NUMBER_OF_PRIME_ACCOUNTS, 1_000_000)
 	createAccounts(g, NUMBER_OF_SECONDARY_ACCOUNTS, 0)
 	return g

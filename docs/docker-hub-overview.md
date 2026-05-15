@@ -5,14 +5,12 @@ Permissioned Proof-of-Stake peer node for the PokoinPOS network.
 ## Image
 
 - `newisdom/pokoinpos-peer:latest`
-- `newisdom/pokoinpos-peer:v0.1.1` (recommended)
-- `newisdom/pokoinpos-peer:v0.1.0` (legacy)
 
 ## Deployment model
 
 - A peer can run as a **seed node** (`JOIN_PORT=-1`) or as a **joining node** (`JOIN_HOST/JOIN_PORT` set).
 - Each peer must use a **unique** `POKOINPOS_LISTEN_PORT`.
-- The node (v0.1.1+) includes:
+- The node includes:
   - automatic reconnect attempts to seed peer
   - persistent local state (chain, miner identity, last slot) mounted under `/data`
 
@@ -42,6 +40,8 @@ POKOINPOS_INITIAL_BALANCE=1000000
 POKOINPOS_STATE_HOST_PATH=./.pokoinpos-peer2-state
 POKOINPOS_STATE_SAVE_INTERVAL_SECONDS=15
 POKOINPOS_RECONNECT_INTERVAL_SECONDS=5
+POKOINPOS_AUTO_UPDATE=true
+POKOINPOS_UPDATE_INTERVAL_SECONDS=60
 EOF
 ```
 
@@ -50,6 +50,12 @@ EOF
 ```bash
 docker compose --env-file peer2.env -f docker-compose.peer.yml up -d --build
 ```
+
+Automatic rollout:
+
+- This compose bundle includes a Watchtower updater service.
+- When a newer `newisdom/pokoinpos-peer` image is published, peers auto-pull and restart.
+- Poll interval is controlled by `POKOINPOS_UPDATE_INTERVAL_SECONDS`.
 
 ## Step 3: Verify health
 
@@ -75,18 +81,64 @@ Recommended source restrictions:
 
 ### Home/lab router deployments
 
-If running behind NAT router:
+If a peer runs at home, the only port that must be reachable from the internet is the **P2P port**:
 
-1. Set static LAN IP for host.
-2. Configure router port forwarding:
-   - WAN `POKOINPOS_LISTEN_PORT` -> host `POKOINPOS_LISTEN_PORT`
-3. Use your public IP (or dynamic DNS) as `POKOINPOS_JOIN_HOST`.
-4. If ISP uses CGNAT, inbound forwarding may fail; use a VPS/Cloud seed node.
+- Forward **TCP `POKOINPOS_LISTEN_PORT`**
+- Example seed node: forward **TCP `43000`**
+- Example second peer: forward **TCP `43001`**
+- Do **not** expose the ops port (`POKOINPOS_OPS_PORT`, usually `8080`) unless you intentionally want remote admin/monitoring access.
 
-Dynamic DNS option (recommended for home IP changes):
+Step-by-step:
 
-- DuckDNS Docker guide: [LinuxServer DuckDNS docs](https://docs.linuxserver.io/images/docker-duckdns/)
-- DuckDNS Docker image: [linuxserver/duckdns on Docker Hub](https://hub.docker.com/r/linuxserver/duckdns/)
+1. Give the Docker host a fixed LAN IP.
+   - Example: `192.168.1.50`
+2. Open your router admin page.
+   - Usually `192.168.1.1` or `192.168.0.1`
+3. Find **Port Forwarding**, **NAT**, **Virtual Server**, or **Applications & Gaming**.
+4. Add one TCP rule:
+
+| Field | Example value |
+| --- | --- |
+| Service name | `pokoinpos-peer` |
+| Protocol | `TCP` |
+| External/WAN port | `43000` |
+| Internal/LAN IP | `192.168.1.50` |
+| Internal/LAN port | `43000` |
+
+5. Allow the same TCP port on the host firewall:
+
+```bash
+sudo ufw allow 43000/tcp
+```
+
+6. Other peers should join using your public IP or DNS name:
+
+```env
+POKOINPOS_JOIN_HOST=your-name.duckdns.org
+POKOINPOS_JOIN_PORT=43000
+```
+
+7. Test from outside your home network:
+
+```bash
+nc -zv your-name.duckdns.org 43000
+```
+
+Dynamic DNS with DuckDNS:
+
+1. Create a DuckDNS subdomain, for example `your-name.duckdns.org`.
+2. Run a DuckDNS updater so the DNS name follows your changing home IP.
+3. Put that DNS name in `POKOINPOS_JOIN_HOST`.
+
+Simple references:
+
+- Router port-forwarding basics: [PortForward.com guide](https://portforward.com/how-to-port-forward)
+- DuckDNS official setup: [DuckDNS install page](https://www.duckdns.org/install.jsp)
+- DuckDNS update API: [DuckDNS API/update spec](https://duckdns.org/spec.jsp)
+- DuckDNS Docker container: [LinuxServer DuckDNS docs](https://docs.linuxserver.io/images/docker-duckdns/)
+- DuckDNS image: [linuxserver/duckdns on Docker Hub](https://hub.docker.com/r/linuxserver/duckdns/)
+
+If the test fails even after forwarding, your ISP may use CGNAT. In that case, use a VPS/cloud seed node instead of a home seed node.
 
 ## Security checklist
 
@@ -126,5 +178,5 @@ docker run -d --name pokoin-seed \
   -v "$(pwd)/.pokoin-seed-state:/data" \
   -p 43000:43000 \
   -p 8080:8080 \
-  newisdom/pokoinpos-peer:v0.1.1
+  newisdom/pokoinpos-peer:latest
 ```

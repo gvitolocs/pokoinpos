@@ -39,7 +39,7 @@ func runHandin() {
 		stakeAccounts = append(stakeAccounts, acc)
 	}
 
-	// Genesis: static stake map (10 accounts, 10^6 AU each).
+	// Genesis: static stake map (10 accounts, 10^6 PK each).
 	// Hardness is tuned so we get a low winner probability per slot.
 	genesis := account.MakeGenesisMetaDataFromAccounts(stakeAccounts, 1_000_000, 10_000, 42)
 
@@ -177,6 +177,7 @@ func runHandin() {
 
 func runNode(cfg NodeConfig) {
 	peer := NewPeer(cfg.ListenPort)
+	peer.SetFinalityDepth(cfg.FinalityDepth)
 	slot := 1
 	if restored, err := loadNodeState(cfg.StateDir, cfg.ListenPort); err == nil {
 		miner, minerErr := account.AccountFromKeyMaterial(restored.Miner)
@@ -247,6 +248,7 @@ func runNode(cfg NodeConfig) {
 		"slotSeconds":     cfg.SlotSeconds,
 		"genesisHardness": cfg.GenesisHardness,
 		"genesisSeed":     cfg.GenesisSeed,
+		"finalityDepth":   cfg.FinalityDepth,
 		"joinHost":        cfg.JoinHost,
 		"joinPort":        cfg.JoinPort,
 		"stateDir":        cfg.StateDir,

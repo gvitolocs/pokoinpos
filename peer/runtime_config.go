@@ -21,6 +21,7 @@ type NodeConfig struct {
 	StateDir                 string
 	StateSaveIntervalSeconds int
 	ReconnectIntervalSeconds int
+	FinalityDepth            int
 }
 
 func LoadNodeConfigFromEnv() (NodeConfig, error) {
@@ -44,6 +45,7 @@ func LoadNodeConfigFromEnv() (NodeConfig, error) {
 			"POKOINPOS_RECONNECT_INTERVAL_SECONDS",
 			5,
 		),
+		FinalityDepth: envIntOrDefault("POKOINPOS_FINALITY_DEPTH", 1),
 	}
 	if cfg.ListenPort <= 0 {
 		return cfg, fmt.Errorf("POKOINPOS_LISTEN_PORT must be > 0")
@@ -59,6 +61,9 @@ func LoadNodeConfigFromEnv() (NodeConfig, error) {
 	}
 	if cfg.ReconnectIntervalSeconds <= 0 {
 		return cfg, fmt.Errorf("POKOINPOS_RECONNECT_INTERVAL_SECONDS must be > 0")
+	}
+	if cfg.FinalityDepth < 0 {
+		return cfg, fmt.Errorf("POKOINPOS_FINALITY_DEPTH must be >= 0")
 	}
 	return cfg, nil
 }

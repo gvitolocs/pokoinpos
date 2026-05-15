@@ -35,7 +35,7 @@ func (l *Ledger) Transaction(t *SignedTransaction) bool {
 	l.TxHistory[t.ID] = *t
 
 	l.Accounts[t.From] -= t.Amount
-	// Exercise 16.2: receiver gets 1 AU less; this difference is the fee.
+	// Exercise 16.2: receiver gets 1 PK less; this difference is the fee.
 	l.Accounts[t.To] += t.Amount - 1
 	return true
 }
