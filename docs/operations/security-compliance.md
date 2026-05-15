@@ -1,63 +1,66 @@
 # Security and Compliance Baseline
 
-This baseline captures minimum controls for a modern blockchain payment platform.
+This document is split into:
 
-## Key management
+- **Implemented controls** for the current permissioned PoS node MVP on Oracle Cloud Free Tier.
+- **Production controls roadmap** still required before regulated payment production.
 
-- Never store private keys in application code or plaintext config.
-- Use HSM/KMS-backed signing where possible.
-- Rotate API keys and webhook secrets regularly.
-- Enforce strict separation between signing keys and read-only keys.
+## Implemented controls (current repository)
 
-## API and app security
+### Host hardening
 
-- Mandatory TLS everywhere.
-- JWT expiration and refresh flow with revocation support.
-- Role-based access control (merchant admin, cashier, finance, support).
-- Idempotency protections on all payment and refund writes.
-- Request signing for high-risk server-to-server operations.
+- Scripted hardening in `deploy/scripts/hardening.sh`:
+  - SSH keys only (`PasswordAuthentication no`, `PermitRootLogin no`)
+  - `ufw` default deny inbound with explicit allow rules
+  - `fail2ban` for SSH brute-force mitigation
+  - unattended security upgrades enabled
 
-## Wallet and transaction safety
+### Process isolation
 
-- Validate destination addresses against policy (allowlists, risk scores).
-- Detect underpayment/overpayment and handle by explicit policy.
-- Confirm chain finality threshold before marking payment as settled.
-- Store immutable audit logs for every state transition.
+- Systemd service template in `deploy/systemd/pokoinpos-node.service`:
+  - dedicated `pokoinpos` system user/group
+  - `NoNewPrivileges=true`
+  - `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`
+  - constrained writable paths (`/var/lib/pokoinpos`, `/var/log/pokoinpos`)
+  - high descriptor/process limits suitable for p2p workloads
 
-## Fraud and risk controls
+### Runtime secret separation
 
-- Velocity limits by wallet, device, and merchant.
-- Suspicious pattern alerts (rapid retries, multi-terminal anomalies).
-- Manual review queue for large or risky transactions.
-- Optional sanctions and AML screening pipeline depending on jurisdiction.
+- Runtime config loaded from env file (`/etc/pokoinpos/node.env`) via bootstrap script.
+- Admin API endpoints require `Authorization: Bearer <token>` (`POKOINPOS_ADMIN_TOKEN`).
+- Secrets are not hardcoded in source.
 
-## Compliance considerations
+### Node health and operations surface
 
-- Maintain KYC/KYB workflows where required.
-- Support tax-ready exports and accounting evidence trails.
-- Retain records according to regional legal requirements.
-- Provide data deletion/anonymization flows where privacy laws require it.
+- Operational endpoints implemented:
+  - `GET /health`
+  - `GET /ready`
+  - `GET /chain/status`
+  - `GET /metrics` (Prometheus text format)
+  - `POST /admin/mine?slot=<n>` (admin-token protected)
 
-## Reliability and incident response
+## Production controls roadmap (remaining)
 
-- Multi-RPC provider failover per supported chain.
-- Queue-based webhook delivery with retries and dead-letter handling.
-- Runbook for chain congestion and reorg scenarios.
-- Backfill/reconciliation jobs for missed events.
+### Key management
 
-## Monitoring and alerting
+- Move validator signing key to HSM/KMS-backed signer adapter.
+- Add key rotation and emergency key revocation runbook.
+- Separate validator signing identity from operational API credentials.
 
-Track and alert on:
+### API and app security
 
-- Quote-to-payment conversion rate
-- Payment confirmation latency by chain
-- Settlement lag and failed payout rate
-- Webhook delivery failure rate
-- RPC error rate and latency
+- Enforce TLS termination with certificate rotation automation.
+- Add JWT-based operator auth with short-lived tokens and revocation.
+- Add rate limiting and request signing on high-risk endpoints.
 
-## Security testing
+### Auditability and compliance
 
-- Automated dependency and container scanning.
-- Periodic penetration tests.
-- Signature verification fuzz tests.
-- Replay-attack and nonce-reuse tests in CI.
+- Immutable audit trail for admin actions and consensus events.
+- Data retention policy by region/jurisdiction.
+- Formal incident response process with postmortem template.
+
+### Security testing gates
+
+- Add dependency scanning and SBOM generation in CI.
+- Add fuzz tests for p2p message parsing and signature handling.
+- Add replay/equivocation test suites in CI.

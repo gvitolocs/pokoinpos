@@ -1,0 +1,36 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: peer/go.mod
+
+      - name: Build Linux ARM64 binary
+        run: make build-arm64
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          cp bin/peer-linux-arm64 dist/peer-linux-arm64
+          tar -czf dist/pokoinpos-linux-arm64.tar.gz -C dist peer-linux-arm64
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/peer-linux-arm64
+            dist/pokoinpos-linux-arm64.tar.gz

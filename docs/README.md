@@ -9,6 +9,7 @@ This project is a blockchain-powered POS platform. The documentation in this fol
 - `integrations/shop-pos.md`: Shop onboarding, POS payment flow, refunds, and settlement.
 - `operations/security-compliance.md`: Security baseline, key management, fraud controls, and compliance requirements.
 - `operations/modern-blockchain-checklist.md`: Feature checklist for chain support, observability, reliability, and scale.
+- `operations/disaster-recovery.md`: Backup/restore procedures, RTO/RPO targets, and DR game-day workflow.
 
 ## Versioning
 

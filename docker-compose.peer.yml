@@ -1,0 +1,31 @@
+services:
+  pokoinpos-peer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${PEER_NAME:-pokoinpos-peer}
+    restart: unless-stopped
+    environment:
+      POKOINPOS_RUN_MODE: node
+      POKOINPOS_LISTEN_PORT: ${POKOINPOS_LISTEN_PORT:-43000}
+      POKOINPOS_OPS_ADDR: :8080
+      POKOINPOS_JOIN_HOST: ${POKOINPOS_JOIN_HOST:-127.0.0.1}
+      POKOINPOS_JOIN_PORT: ${POKOINPOS_JOIN_PORT:--1}
+      POKOINPOS_ADMIN_TOKEN: ${POKOINPOS_ADMIN_TOKEN:-change-me}
+      POKOINPOS_SLOT_SECONDS: ${POKOINPOS_SLOT_SECONDS:-1}
+      POKOINPOS_GENESIS_HARDNESS: ${POKOINPOS_GENESIS_HARDNESS:-10000}
+      POKOINPOS_GENESIS_SEED: ${POKOINPOS_GENESIS_SEED:-42}
+      POKOINPOS_INITIAL_BALANCE: ${POKOINPOS_INITIAL_BALANCE:-1000000}
+      POKOINPOS_STATE_DIR: /data
+      POKOINPOS_STATE_SAVE_INTERVAL_SECONDS: ${POKOINPOS_STATE_SAVE_INTERVAL_SECONDS:-15}
+      POKOINPOS_RECONNECT_INTERVAL_SECONDS: ${POKOINPOS_RECONNECT_INTERVAL_SECONDS:-5}
+    ports:
+      - "${POKOINPOS_LISTEN_PORT:-43000}:${POKOINPOS_LISTEN_PORT:-43000}"
+      - "${POKOINPOS_OPS_PORT:-8080}:8080"
+    volumes:
+      - "${POKOINPOS_STATE_HOST_PATH:-./.pokoinpos-state}:/data"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

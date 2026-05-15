@@ -1,0 +1,31 @@
+[Unit]
+Description=Pokoinpos Permissioned PoS Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pokoinpos
+Group=pokoinpos
+WorkingDirectory=/opt/pokoinpos
+EnvironmentFile=/etc/pokoinpos/node.env
+ExecStart=/opt/pokoinpos/bin/peer
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/pokoinpos /var/log/pokoinpos
+RuntimeDirectory=pokoinpos
+StateDirectory=pokoinpos
+LogsDirectory=pokoinpos
+LimitNOFILE=65535
+LimitNPROC=4096
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

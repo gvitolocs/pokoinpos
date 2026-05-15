@@ -1,0 +1,9 @@
+.git
+.github
+.DS_Store
+bin
+reports
+keys
+ssh-key-*.key
+ssh-key-*.pub
+*.log
