@@ -148,14 +148,42 @@ func (s *OpsServer) rpc(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
 		return
 	}
-	var req JSONRPCRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"jsonrpc": "2.0",
 			"error":   JSONRPCError{Code: -32700, Message: "parse error"},
 		})
 		return
 	}
+	if len(raw) > 0 && raw[0] == '[' {
+		var batch []JSONRPCRequest
+		if err := json.Unmarshal(raw, &batch); err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"error":   JSONRPCError{Code: -32700, Message: "parse error"},
+			})
+			return
+		}
+		responses := make([]map[string]any, 0, len(batch))
+		for _, batchReq := range batch {
+			responses = append(responses, s.rpcResponse(batchReq))
+		}
+		writeJSONAny(w, http.StatusOK, responses)
+		return
+	}
+	var req JSONRPCRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"jsonrpc": "2.0",
+			"error":   JSONRPCError{Code: -32700, Message: "parse error"},
+		})
+		return
+	}
+	writeJSONAny(w, http.StatusOK, s.rpcResponse(req))
+}
+
+func (s *OpsServer) rpcResponse(req JSONRPCRequest) map[string]any {
 	if req.JSONRPC == "" {
 		req.JSONRPC = "2.0"
 	}
@@ -169,7 +197,7 @@ func (s *OpsServer) rpc(w http.ResponseWriter, r *http.Request) {
 	} else {
 		response["result"] = result
 	}
-	writeJSON(w, http.StatusOK, response)
+	return response
 }
 
 func setRPCHeaders(w http.ResponseWriter) {
@@ -214,6 +242,12 @@ func (s *OpsServer) handleRPC(req JSONRPCRequest) (any, *JSONRPCError) {
 		return hexQuantity(new(big.Int).SetUint64(s.peer.NonceOf(strings.ToLower(address)))), nil
 	case "eth_getCode":
 		return "0x", nil
+	case "eth_getBlockByNumber":
+		tag := "latest"
+		if len(req.Params) > 0 {
+			_ = json.Unmarshal(req.Params[0], &tag)
+		}
+		return s.evmBlockObject(tag), nil
 	case "eth_getTransactionByHash":
 		if len(req.Params) < 1 {
 			return nil, &JSONRPCError{Code: -32602, Message: "eth_getTransactionByHash requires hash"}
@@ -307,6 +341,35 @@ func evmTransactionObject(tx account.SignedTransaction) map[string]any {
 		"gas":              "0x5208",
 		"gasPrice":         "0x0",
 		"input":            "0x",
+	}
+}
+
+func (s *OpsServer) evmBlockObject(tag string) map[string]any {
+	height := s.peer.ChainHeight()
+	if tag == "earliest" {
+		height = 0
+	}
+	number := hexQuantity(big.NewInt(int64(height)))
+	return map[string]any{
+		"number":           number,
+		"hash":             "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"parentHash":       "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"nonce":            "0x0000000000000000",
+		"sha3Uncles":       "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+		"logsBloom":        "0x" + strings.Repeat("0", 512),
+		"transactionsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"stateRoot":        "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"receiptsRoot":     "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"miner":            "0x0000000000000000000000000000000000000000",
+		"difficulty":       "0x0",
+		"totalDifficulty":  "0x0",
+		"extraData":        "0x",
+		"size":             "0x0",
+		"gasLimit":         "0x0",
+		"gasUsed":          "0x0",
+		"timestamp":        hexQuantity(big.NewInt(s.peer.UptimeSeconds())),
+		"transactions":     []any{},
+		"uncles":           []any{},
 	}
 }
 
@@ -413,6 +476,10 @@ func (s *OpsServer) isAdminAuthorized(r *http.Request) bool {
 }
 
 func writeJSON(w http.ResponseWriter, code int, body map[string]any) {
+	writeJSONAny(w, code, body)
+}
+
+func writeJSONAny(w http.ResponseWriter, code int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
