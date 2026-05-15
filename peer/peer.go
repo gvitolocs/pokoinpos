@@ -13,6 +13,7 @@ import (
 	"peer/account"
 	"peer/helpers"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,8 @@ type Peer struct {
 	listenport int
 	id         string
 	conns      map[string]net.Conn
+	// peerValidators maps network peer IDs to their advertised validator account.
+	peerValidators map[string]string
 	// output serializes logging to stdout.
 	output chan string
 	// verbose controls per-message logs.
@@ -62,6 +65,11 @@ type MessageHistory struct {
 	isSent       bool     // Has this peer already sent this message.
 }
 
+type connectPayload struct {
+	Peers     []string `json:"peers"`
+	Validator string   `json:"validator,omitempty"`
+}
+
 func NewMessageHistory(msg *Message) *MessageHistory {
 	hist := new(MessageHistory)
 	hist.content = msg
@@ -76,6 +84,7 @@ func NewPeer(listenport int) *Peer {
 	peer.id = strconv.Itoa(listenport)
 	peer.listenport = listenport
 	peer.conns = make(map[string]net.Conn)
+	peer.peerValidators = make(map[string]string)
 	peer.output = make(chan string, 32)
 	peer.received = make(chan Message, 32)
 	peer.msgHistory = make(map[string]MessageHistory)
@@ -93,6 +102,11 @@ func NewPeer(listenport int) *Peer {
 func (p *Peer) ConfigurePoS(genesis *account.GenesisMetaData, miner *account.Account) {
 	p.genesis = genesis
 	p.miner = miner
+	if miner != nil {
+		p.lock.Lock()
+		p.peerValidators[p.id] = miner.SafeEncode()
+		p.lock.Unlock()
+	}
 	p.blockchain = account.NewBlockchainWithGenesis(genesis)
 	p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
 }
@@ -157,10 +171,11 @@ func (p *Peer) listenForPeers(listener net.Listener) {
 // Prepare communication with a peer. fromAccept is true when we accepted the connection (we are "server").
 func (p *Peer) prepareConnection(conn net.Conn, fromAccept bool) ([]string, error) {
 	reader := bufio.NewReader(conn)
-	// Handshake: announce our id, then learn the peer id.
-	// Send a connect message. The other peer will receivee it in their prepareConnection at the readMessage line.
-	// Message payload is the list of known peers, this knows about (self, if this is a new peer, otherwise the entire network).
-	payload, _ := json.Marshal(p.connectionIDs()) // Convert connection keys to []string and marshal it.
+	// Handshake: announce our id, validator identity, and known peers.
+	payload, _ := json.Marshal(connectPayload{
+		Peers:     p.connectionIDs(),
+		Validator: p.validatorAccount(),
+	})
 	_ = p.writeMessage(conn, &Message{Type: helpers.CONNECT_MESSAGE_TYPE, From: p.id, Payload: payload})
 	// Wait for reply to establish their name.
 	msg, err := p.readMessage(reader)
@@ -171,6 +186,7 @@ func (p *Peer) prepareConnection(conn net.Conn, fromAccept bool) ([]string, erro
 	p.lock.Lock()
 	p.conns[msg.From] = conn
 	p.lock.Unlock()
+	p.recordPeerValidator(msg.From, validatorFromConnectPayload(msg.Payload))
 	go p.handleDecode(msg.From, conn, reader)
 	// Catch-up: when we are the server (we accepted), send the new peer all messages we already have
 	// so they get the same ledger and message history as the rest of the network.
@@ -178,8 +194,7 @@ func (p *Peer) prepareConnection(conn net.Conn, fromAccept bool) ([]string, erro
 		p.sendCatchUp(conn)
 	}
 	// Unmarshal the received list of peers the connection knew about.
-	var peers []string
-	json.Unmarshal(msg.Payload, &peers)
+	peers := peersFromConnectPayload(msg.Payload)
 	return peers, nil
 }
 
@@ -322,11 +337,15 @@ func (p *Peer) joinNetwork(addr string, peers []string) {
 
 // floodJoin announces to the network that we joined, so others can add us to their peer set.
 func (p *Peer) floodJoin() {
+	payload, _ := json.Marshal(connectPayload{
+		Peers:     []string{p.id},
+		Validator: p.validatorAccount(),
+	})
 	joinMsg := &Message{
 		Type:    helpers.JOIN_MESSAGE_TYPE,
 		MsgID:   "join-" + p.id,
 		From:    p.id,
-		Payload: []byte(p.id),
+		Payload: payload,
 	}
 	// Put in history first so we (and catch-up) have the content.
 	p.addReceivedFloodMessage(joinMsg)
@@ -348,6 +367,7 @@ func (p *Peer) sendCatchUp(conn net.Conn) {
 // handleJoin adds the new peer from a Join message to our peer set and connects if we didn't know them.
 func (p *Peer) handleJoin(msg *Message) {
 	newPeerID := msg.From
+	p.recordPeerValidator(newPeerID, validatorFromConnectPayload(msg.Payload))
 	if p.hasConnection(newPeerID) {
 		return
 	}
@@ -440,7 +460,20 @@ func (p *Peer) FloodMintTransaction(id string, to string, amount int) (*account.
 	if p.miner == nil || amount < 1 || strings.TrimSpace(to) == "" {
 		return nil, false
 	}
-	tx := account.NewMintTransaction(id, p.miner, strings.ToLower(strings.TrimSpace(to)), amount)
+	tx := account.NewMintTransaction(id, p.miner, strings.TrimSpace(to), amount)
+	p.FloodPoSTransaction(tx)
+	return tx, true
+}
+
+func (p *Peer) FloodValidatorWithdrawTransaction(id string, to string, amount int) (*account.SignedTransaction, bool) {
+	if p.miner == nil || amount < 1 || strings.TrimSpace(to) == "" {
+		return nil, false
+	}
+	to = strings.ToLower(strings.TrimSpace(to))
+	if !strings.HasPrefix(to, "0x") || len(to) != 42 {
+		return nil, false
+	}
+	tx := account.NewSignedTransaction(id, p.miner, to, amount)
 	p.FloodPoSTransaction(tx)
 	return tx, true
 }
@@ -452,12 +485,9 @@ func (p *Peer) MineOneSlot(slot int) *account.Block {
 		return nil
 	}
 	accountName := p.miner.SafeEncode()
-	tickets := p.genesis.InitialBalances[accountName]
-	if tickets <= 0 {
-		return nil
-	}
 	draw := account.ComputeLotteryDraw(p.genesis.Seed, slot, accountName)
-	if !account.WinsLottery(tickets, p.genesis.Hardness, draw) {
+	tickets := account.LedgerFromBlockchain(p.blockchain, 0).LotteryTickets(accountName)
+	if tickets <= 0 || !account.WinsLottery(tickets, p.genesis.Hardness, draw) {
 		return nil
 	}
 
@@ -674,6 +704,90 @@ func (p *Peer) connectionIDs() []string {
 	return slices.Collect(maps.Keys(p.conns))
 }
 
+func (p *Peer) validatorAccount() string {
+	if p.miner == nil {
+		return ""
+	}
+	return p.miner.SafeEncode()
+}
+
+func (p *Peer) recordPeerValidator(peerID string, validator string) {
+	validator = strings.TrimSpace(validator)
+	if peerID == "" || validator == "" {
+		return
+	}
+	p.lock.Lock()
+	p.peerValidators[peerID] = validator
+	p.lock.Unlock()
+}
+
+func peersFromConnectPayload(raw []byte) []string {
+	var payload connectPayload
+	if err := json.Unmarshal(raw, &payload); err == nil && payload.Peers != nil {
+		return payload.Peers
+	}
+	var peers []string
+	_ = json.Unmarshal(raw, &peers)
+	return peers
+}
+
+func validatorFromConnectPayload(raw []byte) string {
+	var payload connectPayload
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		return strings.TrimSpace(payload.Validator)
+	}
+	return ""
+}
+
+type PeerAuthorization struct {
+	PeerID     string `json:"peerId"`
+	Validator  string `json:"validator"`
+	Stake      int    `json:"stake"`
+	Authorized bool   `json:"authorized"`
+	Local      bool   `json:"local"`
+	Connected  bool   `json:"connected"`
+}
+
+func (p *Peer) AuthorizedPeers() []PeerAuthorization {
+	conns := p.connectionSnapshot()
+	p.lock.Lock()
+	validators := make(map[string]string, len(p.peerValidators))
+	for peerID, validator := range p.peerValidators {
+		validators[peerID] = validator
+	}
+	p.lock.Unlock()
+	if p.miner != nil {
+		validators[p.id] = p.miner.SafeEncode()
+	}
+	rows := make([]PeerAuthorization, 0, len(validators))
+	for peerID, validator := range validators {
+		stake := p.BestBalanceOf(validator)
+		_, connected := conns[peerID]
+		rows = append(rows, PeerAuthorization{
+			PeerID:     peerID,
+			Validator:  validator,
+			Stake:      stake,
+			Authorized: validator != "",
+			Local:      peerID == p.id,
+			Connected:  connected && peerID != p.id,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Authorized != rows[j].Authorized {
+			return rows[i].Authorized
+		}
+		return rows[i].PeerID < rows[j].PeerID
+	})
+	return rows
+}
+
+func (p *Peer) IsAuthorizedValidator(accountName string) bool {
+	if p.blockchain == nil {
+		return false
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).IsValidator(accountName)
+}
+
 func (p *Peer) connectionSnapshot() map[string]net.Conn {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -741,6 +855,13 @@ func (p *Peer) BestBalanceOf(accountName string) int {
 		return 0
 	}
 	return account.LedgerFromBlockchain(p.blockchain, 0).GetBalance(accountName)
+}
+
+func (p *Peer) ValidatorStake() int {
+	if p.miner == nil {
+		return 0
+	}
+	return p.BestBalanceOf(p.miner.SafeEncode())
 }
 
 func (p *Peer) NonceOf(accountName string) uint64 {

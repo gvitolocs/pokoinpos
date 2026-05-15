@@ -33,7 +33,9 @@ POKOINPOS_OPS_PORT=8081
 POKOINPOS_JOIN_HOST=92.5.153.117
 POKOINPOS_JOIN_PORT=43000
 POKOINPOS_ADMIN_TOKEN=replace-with-long-random-token
+POKOINPOS_REWARD_PAYOUT_ADDRESS=
 POKOINPOS_SLOT_SECONDS=1
+POKOINPOS_IDLE_SLOT_INTERVAL=30
 POKOINPOS_GENESIS_HARDNESS=10000
 POKOINPOS_GENESIS_SEED=42
 POKOINPOS_INITIAL_BALANCE=1000000
@@ -57,6 +59,19 @@ Automatic rollout:
 - When a newer `newisdom/pokoinpos-peer` image is published, peers auto-pull and restart.
 - Poll interval is controlled by `POKOINPOS_UPDATE_INTERVAL_SECONDS`.
 
+Adaptive mining:
+
+- `POKOINPOS_SLOT_SECONDS` controls how often the node checks whether work is needed.
+- `POKOINPOS_IDLE_SLOT_INTERVAL=30` means an idle node mines only a keepalive block every 30 slots.
+- When transactions enter the mempool, the node mines immediately and scales attempts with `POKOINPOS_MINE_ATTEMPTS_PER_PENDING_TX`.
+- Set `POKOINPOS_IDLE_SLOT_INTERVAL=0` only if you want the old behavior of trying to mine every idle slot.
+- Any node that joins the P2P network with a valid miner identity is a validator, even with zero spendable PKN balance.
+- Validator balance still affects lottery weight: positive-balance validators share 97% proportionally, while all zero-balance validators share 3% cumulatively.
+- The dynamic validator list is available at `/chain/validators`.
+- `POKOINPOS_REWARD_PAYOUT_ADDRESS` is optional. If set to a `0x...` wallet, the node queues a monthly payout of its spendable validator rewards to that wallet.
+- Leaving `POKOINPOS_REWARD_PAYOUT_ADDRESS` empty disables automatic payouts.
+- Validator spendable rewards can also be withdrawn manually with `/admin/withdraw` or the local dashboard.
+
 ## Step 3: Verify health
 
 ```bash
@@ -65,6 +80,14 @@ curl -fsS http://127.0.0.1:8081/health
 curl -fsS http://127.0.0.1:8081/chain/status
 ```
 
+The local node-host dashboard is served from the same ops port:
+
+```text
+http://127.0.0.1:8081/dashboard
+```
+
+If you want the dashboard at `http://localhost:4000/dashboard`, set `POKOINPOS_OPS_PORT=4000` in your env file. The container still listens on `:8080`; `POKOINPOS_OPS_PORT` only controls the host port.
+
 ## Network requirements (critical)
 
 ### Cloud VM (Oracle/AWS/GCP/Azure)
@@ -72,7 +95,7 @@ curl -fsS http://127.0.0.1:8081/chain/status
 Open inbound on the VM host and cloud firewall:
 
 - `POKOINPOS_LISTEN_PORT` (p2p, required)
-- `POKOINPOS_OPS_PORT` (optional externally; recommended internal-only)
+- `POKOINPOS_OPS_PORT` (optional externally; recommended internal-only; default Compose host port is `8080`, but each peer should use a unique host port)
 
 Recommended source restrictions:
 
@@ -86,7 +109,7 @@ If a peer runs at home, the only port that must be reachable from the internet i
 - Forward **TCP `POKOINPOS_LISTEN_PORT`**
 - Example seed node: forward **TCP `43000`**
 - Example second peer: forward **TCP `43001`**
-- Do **not** expose the ops port (`POKOINPOS_OPS_PORT`, usually `8080`) unless you intentionally want remote admin/monitoring access.
+- Do **not** expose the ops port (`POKOINPOS_OPS_PORT`, often `8080`, `8081`, or your chosen dashboard port) unless you intentionally want remote admin/monitoring access.
 
 Step-by-step:
 

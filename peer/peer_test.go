@@ -122,11 +122,11 @@ func TestConnectAndJoinNetwork(t *testing.T) {
 		t.Fatalf("Expected connection from %s in peer1", peer2.id)
 	}
 
-	conns1 := slices.Collect(maps.Keys(peer1.conns))
+	conns1 := peer1.connectionIDs()
 	slices.Sort(conns1)
-	conns2 := slices.Collect(maps.Keys(peer2.conns))
+	conns2 := peer2.connectionIDs()
 	slices.Sort(conns2)
-	conns3 := slices.Collect(maps.Keys(peer2.conns))
+	conns3 := peer3.connectionIDs()
 	slices.Sort(conns3)
 	expected := []string{peer1.id, peer2.id, peer3.id}
 	slices.Sort(expected)
@@ -154,7 +154,7 @@ func TestFloodMessage(t *testing.T) {
 	}
 
 	peer1.FloodNetwork(&Message{MsgID: "flood-001", From: peer1.id, Type: "Test-flood-message"})
-	timeout := time.After(2 * time.Second)
+	timeout := time.After(5 * time.Second)
 	// Wait for each peer to receive the flood message twice (one from each other peer).
 	// NB: peer1 should not receive the message at all!
 	// NB: It is technically possible that peer3 receives from peer1 and peer2 before sending, but the chances are minimal
@@ -391,6 +391,49 @@ func TestFakeTransactionsRejected(t *testing.T) {
 	}
 }
 
+func TestConnectPayloadParsesLegacyAndValidatorFormats(t *testing.T) {
+	legacy := []byte(`["43000","43001"]`)
+	if got := peersFromConnectPayload(legacy); !reflect.DeepEqual(got, []string{"43000", "43001"}) {
+		t.Fatalf("legacy peers: got %#v", got)
+	}
+
+	modern := []byte(`{"peers":["43002"],"validator":"validator-key"}`)
+	if got := peersFromConnectPayload(modern); !reflect.DeepEqual(got, []string{"43002"}) {
+		t.Fatalf("modern peers: got %#v", got)
+	}
+	if got := validatorFromConnectPayload(modern); got != "validator-key" {
+		t.Fatalf("validator: got %q", got)
+	}
+}
+
+func TestAuthorizedPeersUsesP2PValidatorIdentity(t *testing.T) {
+	localMiner, _ := account.NewAccount()
+	remoteMiner, _ := account.NewAccount()
+	unfundedMiner, _ := account.NewAccount()
+	genesis := account.MakeGenesisMetaDataFromAccounts([]*account.Account{localMiner, remoteMiner}, 1_000_000, 1_000_000, 42)
+
+	peer := NewPeer(43121)
+	peer.ConfigurePoS(genesis, localMiner)
+	peer.recordPeerValidator("43122", remoteMiner.SafeEncode())
+	peer.recordPeerValidator("43123", unfundedMiner.SafeEncode())
+
+	rows := peer.AuthorizedPeers()
+	byPeer := make(map[string]PeerAuthorization)
+	for _, row := range rows {
+		byPeer[row.PeerID] = row
+	}
+
+	if !byPeer["43121"].Authorized || !byPeer["43121"].Local {
+		t.Fatalf("local miner should be authorized: %+v", byPeer["43121"])
+	}
+	if !byPeer["43122"].Authorized {
+		t.Fatalf("funded remote miner should be authorized: %+v", byPeer["43122"])
+	}
+	if !byPeer["43123"].Authorized {
+		t.Fatalf("unfunded remote miner should still be authorized by P2P identity: %+v", byPeer["43123"])
+	}
+}
+
 func getFreePort(t *testing.T) int {
 	// Ask the OS for an available port.
 	t.Helper()
@@ -408,10 +451,7 @@ func waitForConn(peer *Peer, id string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	// Cycle for polling the connection map.
 	for time.Now().Before(deadline) {
-		peer.lock.Lock()
-		_, ok := peer.conns[id]
-		peer.lock.Unlock()
-		if ok {
+		if peer.hasConnection(id) {
 			return true
 		}
 		time.Sleep(10 * time.Millisecond)

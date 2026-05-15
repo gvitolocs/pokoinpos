@@ -55,7 +55,10 @@ func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", srv.health)
 	mux.HandleFunc("/ready", srv.ready)
+	mux.HandleFunc("/dashboard", srv.dashboard)
+	mux.HandleFunc("/deshboard", srv.dashboard)
 	mux.HandleFunc("/chain/status", srv.chainStatus)
+	mux.HandleFunc("/chain/validators", srv.validators)
 	mux.HandleFunc("/metrics", srv.metrics)
 	mux.HandleFunc("/endpoints", srv.endpoints)
 	mux.HandleFunc("/explorer/blocks", srv.explorerBlocks)
@@ -64,8 +67,10 @@ func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64
 	mux.HandleFunc("/explorer/address/", srv.explorerAddress)
 	mux.HandleFunc("/explorer/search", srv.explorerSearch)
 	mux.HandleFunc("/rpc", srv.rpc)
+	mux.HandleFunc("/admin/dashboard/status", srv.adminDashboardStatus)
 	mux.HandleFunc("/admin/mine", srv.mineSlot)
 	mux.HandleFunc("/admin/mint", srv.mint)
+	mux.HandleFunc("/admin/withdraw", srv.withdraw)
 	logEvent("ops_server_starting", map[string]any{"addr": addr})
 	return http.ListenAndServe(addr, mux)
 }
@@ -85,7 +90,7 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Summary:        "Liveness and compact node status for dashboards and load balancers.",
 				Authentication: "none",
 				ContentType:    "application/json",
-				ResponseFields: []string{"status", "currencySymbol", "peerCount", "chainHeight", "committedHeight", "finalityDepth", "mempoolDepth", "acceptedBlocks", "acceptedTxs"},
+				ResponseFields: []string{"status", "currencySymbol", "peerCount", "chainHeight", "committedHeight", "finalityDepth", "mempoolDepth", "validatorStake", "acceptedBlocks", "acceptedTxs"},
 				UseCases:       []string{"health page", "uptime checks", "load balancer probes"},
 			},
 			{
@@ -103,8 +108,17 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Summary:        "Detailed chain, finality, peer, mempool, and uptime status.",
 				Authentication: "none",
 				ContentType:    "application/json",
-				ResponseFields: []string{"currencySymbol", "height", "committedHeight", "finalityDepth", "peerCount", "mempoolDepth", "txCount", "acceptedBlocks", "minedBlocks", "uptimeSeconds"},
+				ResponseFields: []string{"currencySymbol", "height", "committedHeight", "finalityDepth", "peerCount", "mempoolDepth", "validatorStake", "txCount", "acceptedBlocks", "minedBlocks", "uptimeSeconds"},
 				UseCases:       []string{"public health page", "chain explorer status", "node operations dashboard"},
+			},
+			{
+				Method:         http.MethodGet,
+				Path:           "/chain/validators",
+				Summary:        "Dynamic connected peer validator view based on advertised validator account and P2P membership.",
+				Authentication: "none",
+				ContentType:    "application/json",
+				ResponseFields: []string{"validators"},
+				UseCases:       []string{"node operator dashboard", "validator authorization checks", "peer diagnostics"},
 			},
 			{
 				Method:         http.MethodGet,
@@ -112,7 +126,7 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Summary:        "Prometheus text metrics for monitoring and alerting.",
 				Authentication: "none",
 				ContentType:    "text/plain; version=0.0.4",
-				ResponseFields: []string{"pokoinpos_chain_height", "pokoinpos_committed_height", "pokoinpos_finality_depth", "pokoinpos_peer_count", "pokoinpos_mempool_depth", "pokoinpos_blocks_accepted_total", "pokoinpos_blocks_mined_total", "pokoinpos_transactions_accepted_total", "pokoinpos_ledger_transaction_count", "pokoinpos_uptime_seconds"},
+				ResponseFields: []string{"pokoinpos_chain_height", "pokoinpos_committed_height", "pokoinpos_finality_depth", "pokoinpos_peer_count", "pokoinpos_mempool_depth", "pokoinpos_validator_stake", "pokoinpos_blocks_accepted_total", "pokoinpos_blocks_mined_total", "pokoinpos_transactions_accepted_total", "pokoinpos_ledger_transaction_count", "pokoinpos_uptime_seconds"},
 				UseCases:       []string{"Prometheus scrape target", "Grafana dashboards", "alerts"},
 			},
 			{
@@ -123,6 +137,14 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				ContentType:    "application/json",
 				ResponseFields: []string{"service", "currency", "endpoints"},
 				UseCases:       []string{"website health page", "API documentation UI", "runtime endpoint discovery"},
+			},
+			{
+				Method:         http.MethodGet,
+				Path:           "/dashboard",
+				Summary:        "Local node-host dashboard for operators running this PokoinPoS node.",
+				Authentication: "none for read-only cards; admin actions require Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
+				ContentType:    "text/html; charset=utf-8",
+				UseCases:       []string{"local node hosting dashboard", "operator status checks", "guarded admin actions"},
 			},
 			{
 				Method:         http.MethodPost,
@@ -170,6 +192,24 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				ContentType:    "application/json",
 				ResponseFields: []string{"hash", "to", "amount"},
 				UseCases:       []string{"treasury allocation", "wrapped-token reserve funding", "sale inventory setup"},
+			},
+			{
+				Method:         http.MethodPost,
+				Path:           "/admin/withdraw",
+				Summary:        "Withdraw this validator's spendable PKN balance to a payout EVM wallet address.",
+				Authentication: "Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
+				ContentType:    "application/json",
+				ResponseFields: []string{"hash", "to", "amount"},
+				UseCases:       []string{"validator payout", "operator rewards withdrawal"},
+			},
+			{
+				Method:         http.MethodGet,
+				Path:           "/admin/dashboard/status",
+				Summary:        "Protected dashboard capability check for the local node-host dashboard.",
+				Authentication: "Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
+				ContentType:    "application/json",
+				ResponseFields: []string{"adminEnabled", "actions", "chainId", "networkId"},
+				UseCases:       []string{"dashboard token validation", "operator admin readiness"},
 			},
 		},
 	})
@@ -811,6 +851,7 @@ func (s *OpsServer) health(w http.ResponseWriter, r *http.Request) {
 		"committedHeight": s.peer.CommittedHeight(),
 		"finalityDepth":   s.peer.FinalityDepth(),
 		"mempoolDepth":    s.peer.MempoolSize(),
+		"validatorStake":  s.peer.ValidatorStake(),
 		"acceptedBlocks":  s.peer.AcceptedBlocks(),
 		"acceptedTxs":     s.peer.AcceptedTransactions(),
 	}
@@ -847,10 +888,21 @@ func (s *OpsServer) chainStatus(w http.ResponseWriter, r *http.Request) {
 		"finalityDepth":   s.peer.FinalityDepth(),
 		"peerCount":       s.peer.PeerCount(),
 		"mempoolDepth":    s.peer.MempoolSize(),
+		"validatorStake":  s.peer.ValidatorStake(),
 		"txCount":         s.peer.TxHistoryCount(),
 		"acceptedBlocks":  s.peer.AcceptedBlocks(),
 		"minedBlocks":     s.peer.MinedBlocks(),
 		"uptimeSeconds":   s.peer.UptimeSeconds(),
+	})
+}
+
+func (s *OpsServer) validators(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"validators": s.peer.AuthorizedPeers(),
 	})
 }
 
@@ -865,6 +917,7 @@ func (s *OpsServer) metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "pokoinpos_finality_depth %d\n", s.peer.FinalityDepth())
 	fmt.Fprintf(w, "pokoinpos_peer_count %d\n", s.peer.PeerCount())
 	fmt.Fprintf(w, "pokoinpos_mempool_depth %d\n", s.peer.MempoolSize())
+	fmt.Fprintf(w, "pokoinpos_validator_stake %d\n", s.peer.ValidatorStake())
 	fmt.Fprintf(w, "pokoinpos_blocks_accepted_total %d\n", s.peer.AcceptedBlocks())
 	fmt.Fprintf(w, "pokoinpos_blocks_mined_total %d\n", s.peer.MinedBlocks())
 	fmt.Fprintf(w, "pokoinpos_transactions_accepted_total %d\n", s.peer.AcceptedTransactions())
@@ -898,6 +951,11 @@ type mintRequest struct {
 	Amount int    `json:"amount"`
 }
 
+type withdrawRequest struct {
+	To     string `json:"to"`
+	Amount int    `json:"amount"`
+}
+
 func (s *OpsServer) mint(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
@@ -912,7 +970,7 @@ func (s *OpsServer) mint(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
 	}
-	req.To = strings.ToLower(strings.TrimSpace(req.To))
+	req.To = strings.TrimSpace(req.To)
 	if req.To == "" || req.Amount < 1 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_mint_request"})
 		return
@@ -920,6 +978,37 @@ func (s *OpsServer) mint(w http.ResponseWriter, r *http.Request) {
 	tx, ok := s.peer.FloodMintTransaction(fmt.Sprintf("mint-%d-%s-%d", time.Now().UnixNano(), req.To, req.Amount), req.To, req.Amount)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "mint_failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"hash":   tx.ID,
+		"to":     tx.To,
+		"amount": tx.Amount,
+	})
+}
+
+func (s *OpsServer) withdraw(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	if !s.isAdminAuthorized(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "admin_auth_required"})
+		return
+	}
+	var req withdrawRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	req.To = strings.ToLower(strings.TrimSpace(req.To))
+	if req.To == "" || req.Amount < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_withdraw_request"})
+		return
+	}
+	tx, ok := s.peer.FloodValidatorWithdrawTransaction(fmt.Sprintf("withdraw-%d-%s-%d", time.Now().UnixNano(), req.To, req.Amount), req.To, req.Amount)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "withdraw_failed"})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{

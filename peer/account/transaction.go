@@ -37,6 +37,9 @@ func (l *Ledger) Transaction(t *SignedTransaction) bool {
 		}
 		l.TxHistory[t.ID] = *t
 		l.Accounts[t.To] += t.Amount
+		if isNativeValidatorAccount(t.To) {
+			l.Validators[t.To] = true
+		}
 		return true
 	}
 	// Native RSA transactions must transfer a positive amount. EVM zero-value

@@ -179,6 +179,7 @@ func runNode(cfg NodeConfig) {
 	peer := NewPeer(cfg.ListenPort)
 	peer.SetFinalityDepth(cfg.FinalityDepth)
 	slot := 1
+	lastPayoutUnix := int64(0)
 	if restored, err := loadNodeState(cfg.StateDir, cfg.ListenPort); err == nil {
 		miner, minerErr := account.AccountFromKeyMaterial(restored.Miner)
 		if minerErr != nil {
@@ -191,6 +192,7 @@ func runNode(cfg NodeConfig) {
 		if restored.LastSlot > 0 {
 			slot = restored.LastSlot + 1
 		}
+		lastPayoutUnix = restored.LastPayoutUnix
 		logEvent("node_state_restored", map[string]any{
 			"stateDir": cfg.StateDir,
 			"lastSlot": restored.LastSlot,
@@ -249,6 +251,7 @@ func runNode(cfg NodeConfig) {
 		"listenPort":               cfg.ListenPort,
 		"opsAddr":                  cfg.OpsAddr,
 		"slotSeconds":              cfg.SlotSeconds,
+		"idleSlotInterval":         cfg.IdleSlotInterval,
 		"baseMineAttempts":         cfg.BaseMineAttemptsPerTick,
 		"maxMineAttempts":          cfg.MaxMineAttemptsPerTick,
 		"mineAttemptsPerPendingTx": cfg.MineAttemptsPerPendingTx,
@@ -258,6 +261,7 @@ func runNode(cfg NodeConfig) {
 		"evmChainID":               cfg.EVMChainID,
 		"evmNetworkID":             cfg.EVMNetworkID,
 		"evmAllocCount":            len(cfg.EVMGenesisAlloc),
+		"rewardPayoutConfigured":   cfg.RewardPayoutAddress != "",
 		"joinHost":                 cfg.JoinHost,
 		"joinPort":                 cfg.JoinPort,
 		"stateDir":                 cfg.StateDir,
@@ -270,7 +274,19 @@ func runNode(cfg NodeConfig) {
 	for {
 		select {
 		case <-ticker.C:
-			attempts := mineAttemptsForNetwork(peer.MempoolSize(), peer.PeerCount()+1, cfg)
+			if tx, paid := maybeQueueMonthlyPayout(peer, cfg, &lastPayoutUnix); paid {
+				logEvent("validator_monthly_payout_queued", map[string]any{
+					"to":     tx.To,
+					"amount": tx.Amount,
+					"hash":   tx.ID,
+				})
+			}
+			mempoolDepth := peer.MempoolSize()
+			if !shouldMineSlot(slot, mempoolDepth, cfg) {
+				slot++
+				continue
+			}
+			attempts := mineAttemptsForNetwork(mempoolDepth, peer.PeerCount()+1, cfg)
 			for attempt := 0; attempt < attempts; attempt++ {
 				mined := peer.MineOneSlot(slot)
 				slot++
@@ -283,11 +299,47 @@ func runNode(cfg NodeConfig) {
 				slot = 1
 			}
 		case <-stateTicker.C:
-			if err := saveNodeState(cfg.StateDir, cfg.ListenPort, peer, slot); err != nil {
+			if err := saveNodeState(cfg.StateDir, cfg.ListenPort, peer, slot, lastPayoutUnix); err != nil {
 				logEvent("node_state_save_failed", map[string]any{"error": err.Error()})
 			}
 		}
 	}
+}
+
+const monthlyPayoutIntervalSeconds = int64(30 * 24 * 60 * 60)
+
+func maybeQueueMonthlyPayout(peer *Peer, cfg NodeConfig, lastPayoutUnix *int64) (*account.SignedTransaction, bool) {
+	if cfg.RewardPayoutAddress == "" || peer == nil || peer.miner == nil {
+		return nil, false
+	}
+	now := time.Now().Unix()
+	if *lastPayoutUnix != 0 && now-*lastPayoutUnix < monthlyPayoutIntervalSeconds {
+		return nil, false
+	}
+	balance := peer.ValidatorStake()
+	if balance <= 0 {
+		return nil, false
+	}
+	tx, ok := peer.FloodValidatorWithdrawTransaction(
+		fmt.Sprintf("monthly-payout-%d-%s-%d", now, cfg.RewardPayoutAddress, balance),
+		cfg.RewardPayoutAddress,
+		balance,
+	)
+	if !ok {
+		return nil, false
+	}
+	*lastPayoutUnix = now
+	return tx, true
+}
+
+func shouldMineSlot(slot int, mempoolDepth int, cfg NodeConfig) bool {
+	if mempoolDepth > 0 {
+		return true
+	}
+	if cfg.IdleSlotInterval == 0 {
+		return true
+	}
+	return slot == 1 || slot%cfg.IdleSlotInterval == 0
 }
 
 func mineAttemptsForNetwork(mempoolDepth int, availableNodes int, cfg NodeConfig) int {

@@ -8,7 +8,7 @@ Default local base URL:
 http://127.0.0.1:8080
 ```
 
-Docker Compose examples may map the ops port to another host port, for example `8081`.
+Inside Docker the node listens on `:8080`. `POKOINPOS_OPS_PORT` controls the host port, so examples may use `8081`, `4000`, or any other free local port.
 
 ## Public Endpoints
 
@@ -27,6 +27,7 @@ Response fields:
 - `committedHeight`: height considered finalized after `finalityDepth`.
 - `finalityDepth`: number of tentative tip blocks excluded from committed state.
 - `mempoolDepth`: number of pending transactions.
+- `validatorStake`: this node miner's current spendable PKN balance used for weighted mining and payout.
 - `acceptedBlocks`: total accepted blocks.
 - `acceptedTxs`: total accepted transactions.
 
@@ -69,6 +70,7 @@ Response fields:
 - `finalityDepth`: number of tentative tip blocks excluded from committed state.
 - `peerCount`: number of connected peers.
 - `mempoolDepth`: number of pending transactions.
+- `validatorStake`: this node miner's current spendable PKN balance used for weighted mining and payout.
 - `txCount`: transaction count in the committed ledger.
 - `acceptedBlocks`: total accepted blocks.
 - `minedBlocks`: blocks mined by this node.
@@ -78,6 +80,31 @@ Example:
 
 ```bash
 curl http://127.0.0.1:8080/chain/status
+```
+
+### `GET /chain/validators`
+
+Dynamic validator list derived from connected peers and advertised validator identity.
+
+Authentication: none.
+
+Response fields:
+
+- `validators`: list of known peer validator identities.
+
+Each validator entry includes:
+
+- `peerId`: network peer ID, currently the listen port identifier.
+- `validator`: advertised validator account/public key.
+- `stake`: current best-chain spendable PKN balance for that validator.
+- `authorized`: true when the peer has advertised a validator identity through P2P.
+- `local`: whether the row is this node.
+- `connected`: whether the row is a currently connected remote peer.
+
+Example:
+
+```bash
+curl http://127.0.0.1:8080/chain/validators
 ```
 
 ### `GET /metrics`
@@ -99,6 +126,7 @@ Metrics:
 - `pokoinpos_finality_depth`
 - `pokoinpos_peer_count`
 - `pokoinpos_mempool_depth`
+- `pokoinpos_validator_stake`
 - `pokoinpos_blocks_accepted_total`
 - `pokoinpos_blocks_mined_total`
 - `pokoinpos_transactions_accepted_total`
@@ -139,6 +167,26 @@ Example:
 ```bash
 curl http://127.0.0.1:8080/endpoints
 ```
+
+### `GET /dashboard`
+
+Local node-host dashboard for operators running a PokoinPoS node.
+
+Authentication: none for read-only cards. Admin actions require:
+
+```text
+Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>
+```
+
+The dashboard shows health, readiness, chain status, peer count, mempool depth, Prometheus metrics links, and guarded admin actions. The typo path `/deshboard` is also accepted for convenience.
+
+Example:
+
+```bash
+open http://127.0.0.1:4000/dashboard
+```
+
+Use `http://127.0.0.1:8080/dashboard` when running with the default ops port. The `4000` URL is just an example if you set `POKOINPOS_OPS_PORT=4000`.
 
 ### `POST /rpc`
 
@@ -210,12 +258,71 @@ curl -X POST \
   "http://127.0.0.1:8080/admin/mine?slot=1"
 ```
 
+### `GET /admin/dashboard/status`
+
+Protected capability check used by the local dashboard.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>
+```
+
+Response fields:
+
+- `adminEnabled`: whether admin actions are available for the supplied token.
+- `actions`: enabled dashboard admin actions.
+- `chainId`: EVM-compatible chain ID.
+- `networkId`: EVM-compatible network ID.
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer ${POKOINPOS_ADMIN_TOKEN}" \
+  http://127.0.0.1:8080/admin/dashboard/status
+```
+
+### `POST /admin/withdraw`
+
+Withdraws this validator node's spendable PKN balance to a payout EVM wallet.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>
+```
+
+Request body:
+
+```json
+{"to":"0x1111111111111111111111111111111111111111","amount":100}
+```
+
+Response fields:
+
+- `hash`: native transaction hash/id.
+- `to`: payout EVM wallet.
+- `amount`: withdrawn PKN amount.
+
+Validator authorization is separate from spendable balance. A validator can withdraw all spendable PKN and remain authorized as long as it continues participating as a P2P node.
+
 ## Website Health Page Integration
 
 For a public site, prefer these calls:
 
 - Use `/health` for a simple green/red health card.
 - Use `/chain/status` for chain height, committed height, peer count, uptime, and currency.
+- Use `/chain/validators` to show the dynamic peer/validator list and payout balances.
 - Use `/endpoints` to render a live list of available node endpoints.
 
 Do not expose `POKOINPOS_ADMIN_TOKEN` in frontend code. If your site needs admin actions, call them through a private backend route.
+
+## Adaptive Mining Notes
+
+The node does not need to mine a new block every slot when there are no transactions. `POKOINPOS_IDLE_SLOT_INTERVAL` controls idle keepalive blocks:
+
+- `30` means mine one idle keepalive block every 30 slots.
+- `0` disables idle backoff and preserves the old behavior.
+- Pending transactions always bypass idle backoff and trigger mining immediately.
+
+Validator eligibility is based on P2P participation with a valid miner identity. Spendable balance affects mining weight, but does not decide whether a validator can mine. Validators with positive balance share 97% of lottery weight proportionally to balance; all zero-balance validators share the remaining 3% cumulatively. Rewards can be withdrawn automatically each month to a configured payout `0x` wallet.

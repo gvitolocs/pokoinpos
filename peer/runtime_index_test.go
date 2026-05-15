@@ -10,7 +10,7 @@ func TestBuildExplorerIndexIndexesCanonicalBlocksAndAddresses(t *testing.T) {
 	miner, _ := account.NewAccount()
 	from, _ := account.NewAccount()
 	to, _ := account.NewAccount()
-	genesis := account.MakeGenesisMetaDataFromAccounts([]*account.Account{miner, from, to}, 1_000_000, 1_000_000, 42)
+	genesis := account.MakeGenesisMetaDataFromAccounts([]*account.Account{miner, from, to}, 1_000_000, 1_000_000_000, 42)
 	peer := NewPeer(43103)
 	peer.SetFinalityDepth(1)
 	peer.ConfigurePoS(genesis, miner)

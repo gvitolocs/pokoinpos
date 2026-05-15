@@ -9,10 +9,11 @@ import (
 )
 
 type nodeState struct {
-	Genesis  account.GenesisMetaData    `json:"genesis"`
-	Miner    account.AccountKeyMaterial `json:"miner"`
-	Blocks   []account.Block            `json:"blocks"`
-	LastSlot int                        `json:"lastSlot"`
+	Genesis        account.GenesisMetaData    `json:"genesis"`
+	Miner          account.AccountKeyMaterial `json:"miner"`
+	Blocks         []account.Block            `json:"blocks"`
+	LastSlot       int                        `json:"lastSlot"`
+	LastPayoutUnix int64                      `json:"lastPayoutUnix,omitempty"`
 }
 
 func stateFilePath(dir string, listenPort int) string {
@@ -35,7 +36,7 @@ func loadNodeState(dir string, listenPort int) (*nodeState, error) {
 	return &state, nil
 }
 
-func saveNodeState(dir string, listenPort int, peer *Peer, lastSlot int) error {
+func saveNodeState(dir string, listenPort int, peer *Peer, lastSlot int, lastPayoutUnix int64) error {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
@@ -43,10 +44,11 @@ func saveNodeState(dir string, listenPort int, peer *Peer, lastSlot int) error {
 		return fmt.Errorf("peer state not initialized")
 	}
 	state := nodeState{
-		Genesis:  *peer.genesis,
-		Miner:    peer.miner.KeyMaterial(),
-		Blocks:   peer.blockchain.BlocksSnapshot(),
-		LastSlot: lastSlot,
+		Genesis:        *peer.genesis,
+		Miner:          peer.miner.KeyMaterial(),
+		Blocks:         peer.blockchain.BlocksSnapshot(),
+		LastSlot:       lastSlot,
+		LastPayoutUnix: lastPayoutUnix,
 	}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
