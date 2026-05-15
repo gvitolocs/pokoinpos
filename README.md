@@ -15,13 +15,12 @@ The project starts from the previous peer-to-peer flooding ledger and extends it
 
 Following the exercise specification, the implementation uses:
 
-- a genesis configuration with **10 initial accounts**, each with **1,000,000 PK**,
+- a genesis configuration with **10 initial accounts**, each with **1,000,000 PKN**,
 - fixed `Hardness` and `Seed` for deterministic lottery checks,
 - one-second slots,
 - transaction validity rules (signature, positive amount, no overdraft),
 - block rewards:
-  - `+10 PK` per accepted block,
-  - `+1 PK` per transaction included in that block.
+  - `+10 PKN` per accepted block.
 
 ## What was implemented
 
@@ -112,6 +111,7 @@ Operational endpoints:
 
 See `docs/node-endpoints.md` for the full endpoint catalog and website health page integration notes.
 See `docs/wallet-compatibility.md` for MetaMask custom network setup.
+See `docs/public-network.md` for public RPC, explorer, and chain registry metadata.
 
 With `POKOINPOS_FINALITY_DEPTH=1`, state-machine execution is based on finalized blocks
 (best chain minus one tentative tip), aligning total-order application with ADNO11 Chapter 14/16 style.

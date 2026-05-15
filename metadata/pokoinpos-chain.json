@@ -1,0 +1,35 @@
+{
+  "name": "PokoinPoS",
+  "title": "PokoinPoS",
+  "chain": "PKN",
+  "chainId": 26062026,
+  "networkId": 26062026,
+  "shortName": "pkn",
+  "nativeCurrency": {
+    "name": "Pokoin",
+    "symbol": "PKN",
+    "decimals": 18
+  },
+  "rpc": [
+    "https://rpc.pokoin.com/rpc"
+  ],
+  "faucets": [],
+  "explorers": [
+    {
+      "name": "PokoinPoS Explorer",
+      "url": "https://explorer.pokoin.com",
+      "standard": "EIP3091"
+    }
+  ],
+  "infoURL": "https://pokoin.com",
+  "icon": "pokoinpos",
+  "features": [
+    {
+      "name": "EIP155"
+    },
+    {
+      "name": "EIP1559"
+    }
+  ],
+  "status": "draft"
+}

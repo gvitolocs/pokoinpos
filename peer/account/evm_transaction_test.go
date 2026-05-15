@@ -18,7 +18,7 @@ func TestEVMTransactionVerifiesAndAdvancesNonce(t *testing.T) {
 	from := crypto.PubkeyToAddress(key.PublicKey)
 	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	chainID := big.NewInt(26062026)
-	rawTx := types.NewTransaction(0, to, big.NewInt(10), 21_000, big.NewInt(0), nil)
+	rawTx := types.NewTransaction(0, to, new(big.Int).Mul(big.NewInt(10), EVMUnit), 21_000, big.NewInt(0), nil)
 	signed, err := types.SignTx(rawTx, types.LatestSignerForChainID(chainID), key)
 	if err != nil {
 		t.Fatalf("sign tx: %v", err)

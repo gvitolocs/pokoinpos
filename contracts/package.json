@@ -1,0 +1,20 @@
+{
+  "name": "pokoinpos-wpkn-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "wPKN BEP-20 contract and BNB Chain deployment scripts.",
+  "scripts": {
+    "build": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:bnb": "hardhat run scripts/deploy-wpkn.js --network bnbMainnet",
+    "verify:bnb": "hardhat run scripts/verify-wpkn.js --network bnbMainnet"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "hh2",
+    "dotenv": "latest",
+    "hardhat": "^2"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "latest"
+  }
+}

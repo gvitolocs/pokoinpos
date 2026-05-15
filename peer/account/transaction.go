@@ -25,12 +25,23 @@ type SignedTransaction struct {
 	ChainID   int64
 }
 
+var EVMUnit = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+
 // Perform transactions. Checks whether transaction is authentic before applying.
 func (l *Ledger) Transaction(t *SignedTransaction) bool {
 	l.lock.Lock()
 	defer l.lock.Unlock()
-	// Exercise 16.2: amount must be positive.
-	if t.Amount < 1 {
+	if t.IsMint() {
+		if t.Amount < 1 || l.Accounts[t.From] <= 0 || !t.Verify(t.From) {
+			return false
+		}
+		l.TxHistory[t.ID] = *t
+		l.Accounts[t.To] += t.Amount
+		return true
+	}
+	// Native RSA transactions must transfer a positive amount. EVM zero-value
+	// transactions are allowed so wallets can cancel/replace pending nonces.
+	if t.Amount < 0 || (!t.IsEVM() && t.Amount < 1) {
 		return false
 	}
 	if !t.Verify(t.From) {
@@ -49,8 +60,7 @@ func (l *Ledger) Transaction(t *SignedTransaction) bool {
 	l.TxHistory[t.ID] = *t
 
 	l.Accounts[t.From] -= t.Amount
-	// Exercise 16.2: receiver gets 1 PK less; this difference is the fee.
-	l.Accounts[t.To] += t.Amount - 1
+	l.Accounts[t.To] += t.Amount
 	if t.IsEVM() {
 		l.Nonces[t.From] = t.Nonce + 1
 	}
@@ -74,6 +84,13 @@ func NewSignedTransaction(ID string, From *Account, To string, Amount int) *Sign
 	return s
 }
 
+func NewMintTransaction(ID string, From *Account, To string, Amount int) *SignedTransaction {
+	s := NewSignedTransaction(ID, From, To, Amount)
+	s.Kind = "mint"
+	s.signTransaction(From.d, From.n)
+	return s
+}
+
 func NewEVMTransaction(raw string, chainID int64) (*SignedTransaction, error) {
 	normalized := strings.TrimPrefix(strings.TrimSpace(raw), "0x")
 	var tx types.Transaction
@@ -90,17 +107,21 @@ func NewEVMTransaction(raw string, chainID int64) (*SignedTransaction, error) {
 		to = strings.ToLower(tx.To().Hex())
 	}
 	value := tx.Value()
-	if value == nil || !value.IsInt64() {
-		return nil, fmt.Errorf("evm value must fit signed 64-bit integer")
+	if value == nil || value.Sign() < 0 {
+		return nil, fmt.Errorf("evm value must be non-negative")
 	}
-	if value.Sign() <= 0 || value.Int64() > int64(^uint(0)>>1) {
-		return nil, fmt.Errorf("evm value must be positive and fit int")
+	amount, remainder := new(big.Int).QuoRem(value, EVMUnit, new(big.Int))
+	if remainder.Sign() != 0 {
+		return nil, fmt.Errorf("evm value must be a whole PKN amount")
+	}
+	if !amount.IsInt64() || amount.Int64() > int64(^uint(0)>>1) {
+		return nil, fmt.Errorf("evm value must fit native amount")
 	}
 	return &SignedTransaction{
 		ID:        strings.ToLower(tx.Hash().Hex()),
 		From:      strings.ToLower(from.Hex()),
 		To:        to,
-		Amount:    int(value.Int64()),
+		Amount:    int(amount.Int64()),
 		Signature: "evm:" + strings.TrimPrefix(strings.TrimSpace(raw), "0x"),
 		Kind:      "evm",
 		Nonce:     tx.Nonce(),
@@ -113,8 +134,12 @@ func (s *SignedTransaction) IsEVM() bool {
 	return s.Kind == "evm" || strings.HasPrefix(s.Signature, "evm:")
 }
 
+func (s *SignedTransaction) IsMint() bool {
+	return s.Kind == "mint"
+}
+
 func (s *SignedTransaction) marshalContentForSignature() ([]byte, error) {
-	return json.Marshal([]string{s.ID, s.From, s.To, strconv.Itoa(s.Amount)})
+	return json.Marshal([]string{s.ID, s.From, s.To, strconv.Itoa(s.Amount), s.Kind})
 }
 
 func (s *SignedTransaction) signTransaction(d, n *big.Int) {
@@ -153,7 +178,8 @@ func (s *SignedTransaction) Verify(accountName string) bool {
 		if tx.To() == nil || !strings.EqualFold(tx.To().Hex(), s.To) {
 			return false
 		}
-		if tx.Value() == nil || !tx.Value().IsInt64() || int(tx.Value().Int64()) != s.Amount {
+		expectedValue := new(big.Int).Mul(big.NewInt(int64(s.Amount)), EVMUnit)
+		if tx.Value() == nil || tx.Value().Cmp(expectedValue) != 0 {
 			return false
 		}
 		return tx.Nonce() == s.Nonce

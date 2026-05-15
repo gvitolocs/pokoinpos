@@ -39,7 +39,7 @@ func runHandin() {
 		stakeAccounts = append(stakeAccounts, acc)
 	}
 
-	// Genesis: static stake map (10 accounts, 10^6 PK each).
+	// Genesis: static stake map (10 accounts, 10^6 PKN each).
 	// Hardness is tuned so we get a low winner probability per slot.
 	genesis := account.MakeGenesisMetaDataFromAccounts(stakeAccounts, 1_000_000, 10_000, 42)
 
@@ -187,7 +187,7 @@ func runNode(cfg NodeConfig) {
 		}
 		peer.ConfigurePoS(&restored.Genesis, miner)
 		peer.blockchain.ReplaceBlocks(restored.Blocks)
-		peer.ledger = account.LedgerFromBlockchain(peer.blockchain, 0)
+		peer.ledger = account.LedgerFromBlockchain(peer.blockchain, cfg.FinalityDepth)
 		if restored.LastSlot > 0 {
 			slot = restored.LastSlot + 1
 		}
@@ -246,18 +246,21 @@ func runNode(cfg NodeConfig) {
 	}()
 
 	logEvent("node_started", map[string]any{
-		"listenPort":      cfg.ListenPort,
-		"opsAddr":         cfg.OpsAddr,
-		"slotSeconds":     cfg.SlotSeconds,
-		"genesisHardness": cfg.GenesisHardness,
-		"genesisSeed":     cfg.GenesisSeed,
-		"finalityDepth":   cfg.FinalityDepth,
-		"evmChainID":      cfg.EVMChainID,
-		"evmNetworkID":    cfg.EVMNetworkID,
-		"evmAllocCount":   len(cfg.EVMGenesisAlloc),
-		"joinHost":        cfg.JoinHost,
-		"joinPort":        cfg.JoinPort,
-		"stateDir":        cfg.StateDir,
+		"listenPort":               cfg.ListenPort,
+		"opsAddr":                  cfg.OpsAddr,
+		"slotSeconds":              cfg.SlotSeconds,
+		"baseMineAttempts":         cfg.BaseMineAttemptsPerTick,
+		"maxMineAttempts":          cfg.MaxMineAttemptsPerTick,
+		"mineAttemptsPerPendingTx": cfg.MineAttemptsPerPendingTx,
+		"genesisHardness":          cfg.GenesisHardness,
+		"genesisSeed":              cfg.GenesisSeed,
+		"finalityDepth":            cfg.FinalityDepth,
+		"evmChainID":               cfg.EVMChainID,
+		"evmNetworkID":             cfg.EVMNetworkID,
+		"evmAllocCount":            len(cfg.EVMGenesisAlloc),
+		"joinHost":                 cfg.JoinHost,
+		"joinPort":                 cfg.JoinPort,
+		"stateDir":                 cfg.StateDir,
 	})
 
 	stateTicker := time.NewTicker(time.Duration(cfg.StateSaveIntervalSeconds) * time.Second)
@@ -267,8 +270,14 @@ func runNode(cfg NodeConfig) {
 	for {
 		select {
 		case <-ticker.C:
-			_ = peer.MineOneSlot(slot)
-			slot++
+			attempts := mineAttemptsForNetwork(peer.MempoolSize(), peer.PeerCount()+1, cfg)
+			for attempt := 0; attempt < attempts; attempt++ {
+				mined := peer.MineOneSlot(slot)
+				slot++
+				if mined != nil {
+					break
+				}
+			}
 			if slot == int(^uint(0)>>1) {
 				// Slot rollover guard for long-running process.
 				slot = 1
@@ -279,4 +288,19 @@ func runNode(cfg NodeConfig) {
 			}
 		}
 	}
+}
+
+func mineAttemptsForNetwork(mempoolDepth int, availableNodes int, cfg NodeConfig) int {
+	if availableNodes < 1 {
+		availableNodes = 1
+	}
+	networkAttempts := cfg.BaseMineAttemptsPerTick + mempoolDepth*cfg.MineAttemptsPerPendingTx
+	attempts := (networkAttempts + availableNodes - 1) / availableNodes
+	if attempts > cfg.MaxMineAttemptsPerTick {
+		return cfg.MaxMineAttemptsPerTick
+	}
+	if attempts < cfg.BaseMineAttemptsPerTick {
+		return cfg.BaseMineAttemptsPerTick
+	}
+	return attempts
 }

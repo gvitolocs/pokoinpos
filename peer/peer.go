@@ -14,6 +14,7 @@ import (
 	"peer/helpers"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -435,6 +436,15 @@ func (p *Peer) FloodPoSTransaction(tx *account.SignedTransaction) {
 	p.FloodNetwork(msg)
 }
 
+func (p *Peer) FloodMintTransaction(id string, to string, amount int) (*account.SignedTransaction, bool) {
+	if p.miner == nil || amount < 1 || strings.TrimSpace(to) == "" {
+		return nil, false
+	}
+	tx := account.NewMintTransaction(id, p.miner, strings.ToLower(strings.TrimSpace(to)), amount)
+	p.FloodPoSTransaction(tx)
+	return tx, true
+}
+
 // MineOneSlot tries to produce and flood one block for the given slot.
 // Returns the mined block when successful.
 func (p *Peer) MineOneSlot(slot int) *account.Block {
@@ -531,7 +541,7 @@ func (p *Peer) handlePoSTransaction(msg *Message) bool {
 		return false
 	}
 	// Cheap local checks before inserting to mempool.
-	if tx.Amount < 1 {
+	if tx.Amount < 0 || (!tx.IsEVM() && tx.Amount < 1) {
 		return false
 	}
 	if !tx.Verify(tx.From) {
@@ -543,10 +553,18 @@ func (p *Peer) handlePoSTransaction(msg *Message) bool {
 	if _, exists := p.msgHistory[msg.MsgID]; exists {
 		return false
 	}
-	// Deduplicate mempool entries too.
+	// Deduplicate mempool entries too. EVM wallets use same-nonce replacements
+	// for speeding up and cancellation, so keep only the latest tx for a nonce.
 	p.mempoolLock.Lock()
 	_, exists := p.mempool[tx.ID]
 	if !exists {
+		if tx.IsEVM() {
+			for id, pending := range p.mempool {
+				if pending.IsEVM() && strings.EqualFold(pending.From, tx.From) && pending.Nonce == tx.Nonce {
+					delete(p.mempool, id)
+				}
+			}
+		}
 		p.mempool[tx.ID] = tx
 	}
 	p.mempoolLock.Unlock()
@@ -718,6 +736,13 @@ func (p *Peer) BalanceOf(accountName string) int {
 	return p.ledger.GetBalance(accountName)
 }
 
+func (p *Peer) BestBalanceOf(accountName string) int {
+	if p.blockchain == nil {
+		return 0
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).GetBalance(accountName)
+}
+
 func (p *Peer) NonceOf(accountName string) uint64 {
 	if p.ledger == nil {
 		return 0
@@ -725,17 +750,69 @@ func (p *Peer) NonceOf(accountName string) uint64 {
 	return p.ledger.GetNonce(accountName)
 }
 
-func (p *Peer) TransactionByID(txID string) (account.SignedTransaction, bool) {
-	if p.ledger != nil {
-		accounts := p.ledger.CopyTransactions()
-		if tx, exists := accounts[txID]; exists {
-			return tx, true
+func (p *Peer) BestNonceOf(accountName string) uint64 {
+	if p.blockchain == nil {
+		return 0
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).GetNonce(accountName)
+}
+
+func (p *Peer) PendingNonceOf(accountName string) uint64 {
+	nonce := p.BestNonceOf(accountName)
+	p.mempoolLock.Lock()
+	defer p.mempoolLock.Unlock()
+	for _, tx := range p.mempool {
+		if tx.IsEVM() && strings.EqualFold(tx.From, accountName) && tx.Nonce >= nonce {
+			nonce = tx.Nonce + 1
 		}
+	}
+	return nonce
+}
+
+func (p *Peer) TransactionByID(txID string) (account.SignedTransaction, bool) {
+	if explorerTx, exists := BuildExplorerIndex(p).TxsByHash[strings.ToLower(txID)]; exists {
+		return signedTransactionFromExplorer(explorerTx), true
 	}
 	p.mempoolLock.Lock()
 	defer p.mempoolLock.Unlock()
 	tx, exists := p.mempool[txID]
 	return tx, exists
+}
+
+func (p *Peer) TransactionLocation(txID string) (account.SignedTransaction, string, int, uint64, bool) {
+	if explorerTx, exists := BuildExplorerIndex(p).TxsByHash[strings.ToLower(txID)]; exists {
+		return signedTransactionFromExplorer(explorerTx), explorerTx.BlockHash, explorerTx.BlockNumber, uint64(explorerTx.TransactionIndex), true
+	}
+	p.mempoolLock.Lock()
+	defer p.mempoolLock.Unlock()
+	tx, exists := p.mempool[txID]
+	return tx, "", 0, 0, exists
+}
+
+func (p *Peer) BlockByNumber(height int) (account.Block, int, bool) {
+	if p.blockchain == nil {
+		return account.Block{}, 0, false
+	}
+	blocks := p.blockchain.CanonicalBlocks(0)
+	if height < 0 || height >= len(blocks) {
+		return account.Block{}, 0, false
+	}
+	return blocks[height], height, true
+}
+
+func (p *Peer) BlockByHash(hash string) (account.Block, int, bool) {
+	if p.blockchain == nil {
+		return account.Block{}, 0, false
+	}
+	hash = strings.TrimPrefix(strings.ToLower(hash), "0x")
+	blocks := p.blockchain.CanonicalBlocks(0)
+	for height, block := range blocks {
+		blockHash := block.GetBlockHash()
+		if fmt.Sprintf("%x", blockHash[:]) == hash {
+			return block, height, true
+		}
+	}
+	return account.Block{}, 0, false
 }
 
 func (p *Peer) Ready() bool {

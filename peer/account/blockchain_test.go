@@ -85,10 +85,10 @@ func TestAddBlockAppliesTransactionsAndRewards(t *testing.T) {
 	if got, want := ledger.Accounts[from.SafeEncode()], 1_000_000-10; got != want {
 		t.Fatalf("wrong sender balance: got %d want %d", got, want)
 	}
-	if got, want := ledger.Accounts[to.SafeEncode()], 1_000_000+9; got != want {
+	if got, want := ledger.Accounts[to.SafeEncode()], 1_000_000+10; got != want {
 		t.Fatalf("wrong receiver balance: got %d want %d", got, want)
 	}
-	if got, want := ledger.Accounts[miner.SafeEncode()], 1_000_000+11; got != want {
+	if got, want := ledger.Accounts[miner.SafeEncode()], 1_000_000+10; got != want {
 		t.Fatalf("wrong miner balance: got %d want %d", got, want)
 	}
 	if len(ledger.TxHistory) != 1 {
@@ -118,5 +118,27 @@ func TestAddBlockRejectsInvalidTransaction(t *testing.T) {
 	}
 	if got := ledger.Accounts[from.SafeEncode()]; got != 1_000_000 {
 		t.Fatalf("sender balance changed unexpectedly: %d", got)
+	}
+}
+
+func TestMintTransactionCreditsReceiverWithoutDebitingMiner(t *testing.T) {
+	miner, _ := NewAccount()
+	to, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner}, 1_000_000, 1_000_000, 42)
+	chain := NewBlockchainWithGenesis(genesis)
+
+	tx := NewMintTransaction("mint-1", miner, to.SafeEncode(), 2_000_000)
+	parent := chain.Blocks[0].GetBlockHash()
+	block := NewCandidateBlock(miner, 1, encode(parent[:]), []SignedTransaction{*tx}, genesis.Seed)
+	if ok := chain.AddBlock(block); !ok {
+		t.Fatalf("expected mint block to be valid")
+	}
+
+	ledger := LedgerFromBlockchain(chain, 0)
+	if got := ledger.Accounts[to.SafeEncode()]; got != 2_000_000 {
+		t.Fatalf("wrong minted balance: got %d", got)
+	}
+	if got := ledger.Accounts[miner.SafeEncode()]; got != 1_000_000+MINER_BLOCK_REWARD {
+		t.Fatalf("wrong miner balance: got %d", got)
 	}
 }

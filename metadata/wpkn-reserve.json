@@ -1,0 +1,55 @@
+{
+  "asset": "wPKN",
+  "assetName": "Wrapped PKN",
+  "nativeAsset": "PKN",
+  "backingModel": "1 native PKN reserved for every 1 wPKN minted",
+  "reservedNativeAmount": "2000000",
+  "reservedNativeDecimals": 18,
+  "nativeChain": {
+    "name": "PokoinPoS",
+    "chainId": 26062026,
+    "rpcUrl": "https://rpc.pokoin.com/rpc",
+    "explorerUrl": "https://explorer.pokoin.com"
+  },
+  "nativeTreasury": {
+    "address": "0x74466c3a204429b22ce8558f3f18f3c59f67fcb3",
+    "reservedAmount": "2000000",
+    "note": "This address currently holds more than the reserved amount; only 2,000,000 PKN are allocated to wPKN backing."
+  },
+  "wrappedChain": {
+    "name": "BNB Smart Chain",
+    "chainId": 56,
+    "symbol": "BNB",
+    "rpcUrl": "https://bsc-dataseed.binance.org/",
+    "explorerUrl": "https://bscscan.com"
+  },
+  "wrappedToken": {
+    "contractAddress": "0x91A17E2bddfF839078BD395482B38e4AC15276f4",
+    "name": "Wrapped PKN",
+    "symbol": "wPKN",
+    "decimals": 18,
+    "maxBackedSupply": "2000000",
+    "totalSupply": "2000000",
+    "deploymentTxHash": "0xe7d0bd3787a134e82c2477efe26a18f58d2322ef84ba10003bea4befa54a0c90"
+  },
+  "pancakeSwap": {
+    "initialPair": "wPKN/BNB",
+    "poolAddress": "0x86294c008542C2707B9f67e3E4BA2d03B7bF7451",
+    "routerAddress": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+    "factoryAddress": "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73",
+    "initialLiquidity": {
+      "wpkn": "2000",
+      "bnb": "0.0015",
+      "approveTxHash": "0xc9ba216a3be3b90f82b14817a74e7e3e8eb322c69b8562fac3249fc8fa02eb1a",
+      "liquidityTxHash": "0xd4d1d40c31d1efff2be4b6e0d29d54877a5732709a95648c01860a663a15defb",
+      "blockNumber": 98446973
+    }
+  },
+  "rules": [
+    "Circulating wPKN must never exceed reserved native PKN.",
+    "If native PKN is released from reserve, the matching wPKN must be burned first.",
+    "Any increase to wPKN supply requires updating this manifest and reserving the same amount of native PKN."
+  ],
+  "status": "live",
+  "lastUpdated": "2026-05-15"
+}

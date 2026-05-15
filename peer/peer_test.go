@@ -386,7 +386,7 @@ func TestFakeTransactionsRejected(t *testing.T) {
 	if peer1.ledger.Accounts[user1.SafeEncode()] != 0 {
 		t.Errorf("Wrong account balance. Fake messages were accepted.")
 	}
-	if peer1.ledger.Accounts[user2.SafeEncode()] != 9 {
+	if peer1.ledger.Accounts[user2.SafeEncode()] != 10 {
 		t.Errorf("Wrong account balance. Fake messages were accepted.")
 	}
 }

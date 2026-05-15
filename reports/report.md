@@ -23,7 +23,7 @@ The project now covers:
 - persistent node state and reconnect behavior,
 - Docker deployment with automatic peer updates,
 - operational APIs, metrics, and production runbooks,
-- native currency display as `PK`.
+- native currency display as `PKN`.
 
 # Blockchain Design
 
@@ -32,7 +32,7 @@ The project now covers:
 Genesis defines the permissioned validator set and initial balances:
 
 - 10 initial accounts,
-- 1,000,000 PK each,
+- 1,000,000 PKN each,
 - fixed `Hardness` and `Seed` values for deterministic lottery checks.
 
 All peers use the same genesis metadata, so they start from the same state and can independently validate blocks.
@@ -90,20 +90,19 @@ If one transaction is invalid, the whole block is rejected.
 
 # Currency, Fees, and Rewards
 
-The native currency symbol is `PK`.
+The native currency symbol is `PKN`.
 
 Transaction accounting:
 
 - sender pays the full amount,
-- receiver gets `amount - 1`,
-- the `1 PK` difference is the transaction fee.
+- receiver gets the full amount,
+- no fixed transfer fee is taken by the native ledger.
 
 Block rewards:
 
-- `+10 PK` per accepted block,
-- `+1 PK` per transaction included in that block.
+- `+10 PKN` per accepted block.
 
-The currency symbol is also returned by runtime status endpoints as `currencySymbol: "PK"`.
+The currency symbol is also returned by runtime status endpoints as `currencySymbol: "PKN"`.
 
 # Runtime and Operations
 
@@ -170,7 +169,7 @@ The MVP was deployed on Oracle Cloud Free Tier instances. The deployment uses:
 
 The current live Oracle peers were updated to the latest image and both report:
 
-- `currencySymbol: "PK"`,
+- `currencySymbol: "PKN"`,
 - `peerCount: 1`,
 - `finalityDepth: 1`.
 

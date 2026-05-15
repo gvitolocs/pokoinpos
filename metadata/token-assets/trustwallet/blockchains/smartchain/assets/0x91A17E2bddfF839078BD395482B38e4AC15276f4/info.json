@@ -1,0 +1,25 @@
+{
+  "name": "Wrapped PKN",
+  "type": "BEP20",
+  "symbol": "wPKN",
+  "decimals": 18,
+  "description": "Wrapped PKN is the BNB Chain representation of native PKN from PokoinPoS, backed 1:1 by a native PKN reserve.",
+  "website": "https://pokoin.com",
+  "explorer": "https://bscscan.com/token/0x91A17E2bddfF839078BD395482B38e4AC15276f4",
+  "status": "active",
+  "id": "0x91A17E2bddfF839078BD395482B38e4AC15276f4",
+  "links": [
+    {
+      "name": "explorer",
+      "url": "https://explorer.pokoin.com"
+    },
+    {
+      "name": "reserve",
+      "url": "https://explorer.pokoin.com/wpkn-reserve.json"
+    }
+  ],
+  "tags": [
+    "wrapped-token",
+    "defi"
+  ]
+}

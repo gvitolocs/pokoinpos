@@ -81,6 +81,26 @@ func (b *Blockchain) BlocksSnapshot() []Block {
 	return out
 }
 
+func (b *Blockchain) CanonicalBlocks(rollback int) []Block {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	depths, nodes := b.calculateDepths()
+	leaf := getLeafHash(depths)
+	blocks := getBlocksFromLongestBranch(nodes, leaf)
+	if rollback > 0 && rollback < len(blocks) {
+		blocks = blocks[:len(blocks)-rollback]
+	} else if rollback >= len(blocks) {
+		if len(blocks) > 0 {
+			blocks = blocks[:1]
+		}
+	}
+	out := make([]Block, len(blocks))
+	for i, block := range blocks {
+		out[i] = *block
+	}
+	return out
+}
+
 func (b *Blockchain) ReplaceBlocks(blocks []Block) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
@@ -231,7 +251,7 @@ func (b *Blockchain) AddBlock(block *Block) bool {
 		}
 	}
 	// Apply miner reward after all txs are valid.
-	ledger.Accounts[block.VerificationKey] += MINER_BLOCK_REWARD + len(txs)
+	ledger.Accounts[block.VerificationKey] += MINER_BLOCK_REWARD
 
 	b.Blocks = append(b.Blocks, *block)
 	return true
@@ -370,7 +390,9 @@ func LedgerFromBlockchain(b *Blockchain, rollback int) *Ledger {
 	if rollback > 0 && rollback < len(blocks) {
 		blocks = blocks[:len(blocks)-rollback]
 	} else if rollback >= len(blocks) {
-		blocks = []*Block{}
+		if len(blocks) > 0 {
+			blocks = blocks[:1]
+		}
 	}
 	return buildLedgerFromBlocks(blocks)
 }
@@ -455,8 +477,8 @@ func buildLedgerFromBlocks(blocks []*Block) *Ledger {
 		for j := range txs {
 			_ = ledger.Transaction(&txs[j])
 		}
-		// Miner reward (inflation + tx fees).
-		ledger.Accounts[block.VerificationKey] += MINER_BLOCK_REWARD + len(txs)
+		// Miner reward.
+		ledger.Accounts[block.VerificationKey] += MINER_BLOCK_REWARD
 	}
 	return ledger
 }

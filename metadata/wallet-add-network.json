@@ -1,0 +1,23 @@
+{
+  "method": "wallet_addEthereumChain",
+  "params": [
+    {
+      "chainId": "0x18dacca",
+      "chainName": "PokoinPoS",
+      "nativeCurrency": {
+        "name": "Pokoin",
+        "symbol": "PKN",
+        "decimals": 18
+      },
+      "rpcUrls": [
+        "https://rpc.pokoin.com/rpc"
+      ],
+      "blockExplorerUrls": [
+        "https://explorer.pokoin.com"
+      ],
+      "iconUrls": [
+        "https://explorer.pokoin.com/pokoinpos-logo.png"
+      ]
+    }
+  ]
+}
