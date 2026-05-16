@@ -1,12 +1,27 @@
-# Documentation
+# PokoinPoS Documentation
 
-This project is a blockchain-powered POS platform. The documentation in this folder defines the API contract, integration patterns, and production requirements for a modern deployment.
+This folder documents the PokoinPoS node, public RPC surface, wallet compatibility, deployment runbooks, and operating requirements for the Pokoin/CardVault ecosystem.
+
+The public web experience now lives in the separate `cardvault` repository as a single Flutter web app:
+
+- `https://pokoin.com/` for CardVault
+- `https://pokoin.com/wallet` for the integrated Pokoin Wallet
+
+This repository documents the chain side:
+
+- public RPC and health endpoints,
+- MetaMask-compatible JSON-RPC behavior,
+- validator/mining rules,
+- Docker and Oracle Free Tier deployment,
+- disaster recovery and security runbooks.
 
 ## Contents
 
 - `api/endpoints.md`: REST API endpoints, request/response models, and webhook contracts.
 - `node-endpoints.md`: Live PokoinPoS node endpoints for health pages, monitoring, and admin smoke tests.
+- `public-network.md`: Public chain metadata, explorer/RPC URLs, and wallet-facing network values.
 - `wallet-compatibility.md`: MetaMask-style wallet setup, JSON-RPC compatibility, and next steps for full transaction support.
+- `docker-hub-overview.md`: Docker image publishing, peer deployment, and auto-update workflow.
 - `integrations/wallets.md`: Wallet connection patterns for browser, mobile, and server-side verification.
 - `integrations/shop-pos.md`: Shop onboarding, POS payment flow, refunds, and settlement.
 - `operations/security-compliance.md`: Security baseline, key management, fraud controls, and compliance requirements.

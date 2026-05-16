@@ -1,8 +1,29 @@
-# Hand-in 10 - Exercise 16.2 (Static Proof-of-Stake Blockchain)
+# PokoinPoS
 
-This repository contains the implementation of **Exercise 16.2** from the ADNO course material, focused on a simple but complete **tree-based blockchain with static Proof-of-Stake (PoS)**.
+PokoinPoS is the native Proof-of-Stake chain used by the Pokoin/CardVault ecosystem.
+It started as an ADNO static PoS exercise and has been extended into a production-style node with public RPC, health endpoints, Docker deployment, peer auto-updates, and wallet compatibility.
 
-The project starts from the previous peer-to-peer flooding ledger and extends it into a PoS blockchain system with:
+## Current Network Surface
+
+- Public website and wallet: `https://pokoin.com`
+- Wallet route: `https://pokoin.com/wallet`
+- Public RPC: `https://rpc.pokoin.com/rpc`
+- Public health page: `https://rpc.pokoin.com/health`
+- Explorer: `https://explorer.pokoin.com`
+- Chain ID: `26062026` (`0x18dacca`)
+- Native currency: `PKN`
+
+The CardVault website and Pokoin Wallet now live in a single Flutter web app in the separate `cardvault` repository. This repository remains the source of truth for the chain, node runtime, RPC behavior, deployment scripts, and blockchain documentation.
+
+## Consensus Model
+
+The node uses slot-based Proof-of-Stake with deterministic lottery draws. Mining weight is based on validator balance, with a whale cap rule:
+
+- validators with positive balance collectively compete for 97% of mining probability, proportional to stake;
+- zero-balance validators collectively share the remaining 3%;
+- a large balance can dominate the 97% pool, but cannot take the entire validator probability alone.
+
+Core behavior includes:
 
 - slot-based block production,
 - longest-chain total ordering,
@@ -11,9 +32,9 @@ The project starts from the previous peer-to-peer flooding ledger and extends it
 - throughput measurement,
 - rollback observation.
 
-## Context from the exercise
+## Academic Origin
 
-Following the exercise specification, the implementation uses:
+Following the original exercise specification, the implementation uses:
 
 - a genesis configuration with **10 initial accounts**, each with **1,000,000 PKN**,
 - fixed `Hardness` and `Seed` for deterministic lottery checks,
