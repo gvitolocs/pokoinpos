@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"os"
@@ -215,17 +216,48 @@ func runNode(cfg NodeConfig) {
 		}
 		peer.ConfigurePoS(genesis, miner)
 	}
-	peer.StartWithConnection(cfg.JoinHost, cfg.JoinPort)
-
+	peer.SetAdvertiseHost(cfg.AdvertiseHost)
+	bootstrapRegistry := NewBootstrapRegistry(cfg.BootstrapManifestURL, cfg.BootstrapRefreshHours, cfg.BootstrapPeers)
+	bootstrapPeers := mergeBootstrapPeers(bootstrapRegistry.Peers(context.Background()), cfg.BootstrapPeers)
+	bootstrapRegistry.Start(context.Background())
+	startedFromBootstrap := false
+	if err := peer.Start(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 	go func() {
-		if err := StartOpsServer(cfg.OpsAddr, peer, cfg.AdminToken, cfg.EVMChainID, cfg.EVMNetworkID); err != nil {
+		if err := StartOpsServer(cfg.OpsAddr, peer, cfg.AdminToken, cfg.EVMChainID, cfg.EVMNetworkID, bootstrapRegistry); err != nil {
 			logEvent("ops_server_stopped", map[string]any{"error": err.Error()})
 			os.Exit(1)
 		}
 	}()
 
+	for _, bootstrap := range bootstrapPeers {
+		peers, err := peer.ConnectAddress(bootstrap)
+		if err != nil {
+			continue
+		}
+		peer.joinKnownPeers(peers)
+		peer.floodJoin()
+		startedFromBootstrap = true
+		logEvent("bootstrap_join_succeeded", map[string]any{
+			"host": bootstrap.Host,
+			"port": bootstrap.Port,
+		})
+		break
+	}
+	if !startedFromBootstrap && cfg.JoinPort > 0 {
+		peers, err := peer.Connect(cfg.JoinHost, cfg.JoinPort)
+		if err == nil {
+			peer.joinNetwork(cfg.JoinHost, peers)
+			peer.joinKnownPeers(peer.knownPeerAddresses())
+			peer.floodJoin()
+			startedFromBootstrap = true
+		}
+	}
+
 	go func() {
-		if cfg.JoinPort < 0 {
+		if cfg.JoinPort < 0 && len(cfg.BootstrapPeers) == 0 && len(bootstrapPeers) == 0 {
 			return
 		}
 		reconnectTicker := time.NewTicker(time.Duration(cfg.ReconnectIntervalSeconds) * time.Second)
@@ -234,11 +266,52 @@ func runNode(cfg NodeConfig) {
 			if peer.PeerCount() > 0 {
 				continue
 			}
+			reconnected := false
+			for _, address := range peer.knownPeerAddresses() {
+				peers, err := peer.ConnectAddress(address)
+				if err != nil {
+					continue
+				}
+				peer.joinKnownPeers(peers)
+				peer.floodJoin()
+				reconnected = true
+				logEvent("known_peer_reconnect_succeeded", map[string]any{
+					"peerId": address.ID,
+					"host":   address.Host,
+					"port":   address.Port,
+				})
+				break
+			}
+			if reconnected {
+				continue
+			}
+			manifestPeers := bootstrapRegistry.CachedPeers()
+			for _, bootstrap := range mergeBootstrapPeers(manifestPeers, cfg.BootstrapPeers) {
+				peers, err := peer.ConnectAddress(bootstrap)
+				if err != nil {
+					continue
+				}
+				peer.joinKnownPeers(peers)
+				peer.floodJoin()
+				reconnected = true
+				logEvent("bootstrap_reconnect_succeeded", map[string]any{
+					"host": bootstrap.Host,
+					"port": bootstrap.Port,
+				})
+				break
+			}
+			if reconnected {
+				continue
+			}
+			if cfg.JoinPort < 0 {
+				continue
+			}
 			peers, err := peer.Connect(cfg.JoinHost, cfg.JoinPort)
 			if err != nil {
 				continue
 			}
 			peer.joinNetwork(cfg.JoinHost, peers)
+			peer.joinKnownPeers(peer.knownPeerAddresses())
 			peer.floodJoin()
 			logEvent("seed_reconnect_succeeded", map[string]any{
 				"joinHost": cfg.JoinHost,
@@ -249,6 +322,7 @@ func runNode(cfg NodeConfig) {
 
 	logEvent("node_started", map[string]any{
 		"listenPort":               cfg.ListenPort,
+		"advertiseHost":            cfg.AdvertiseHost,
 		"opsAddr":                  cfg.OpsAddr,
 		"slotSeconds":              cfg.SlotSeconds,
 		"idleSlotInterval":         cfg.IdleSlotInterval,
@@ -264,6 +338,8 @@ func runNode(cfg NodeConfig) {
 		"rewardPayoutConfigured":   cfg.RewardPayoutAddress != "",
 		"joinHost":                 cfg.JoinHost,
 		"joinPort":                 cfg.JoinPort,
+		"bootstrapManifestURL":     cfg.BootstrapManifestURL,
+		"bootstrapPeerCount":       len(bootstrapPeers),
 		"stateDir":                 cfg.StateDir,
 	})
 

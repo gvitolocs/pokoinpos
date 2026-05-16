@@ -27,7 +27,8 @@ This document is split into:
 ### Runtime secret separation
 
 - Runtime config loaded from env file (`/etc/pokoinpos/node.env`) via bootstrap script.
-- Admin API endpoints require `Authorization: Bearer <token>` (`POKOINPOS_ADMIN_TOKEN`).
+- Guarded operator API endpoints require `Authorization: Bearer <token>` when
+  `POKOINPOS_OPERATOR_TOKEN` is configured. Ordinary public peers can leave it empty.
 - Secrets are not hardcoded in source.
 
 ### Node health and operations surface

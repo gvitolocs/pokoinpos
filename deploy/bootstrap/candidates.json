@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-05-16T00:00:00Z",
+  "policy": {
+    "vettingDays": 14,
+    "vettingMinimumUptimeRatio": 0.95,
+    "bootstrapMaturityDays": 365,
+    "eligibilityWindowDays": 365,
+    "minimumUptimeRatio": 0.94,
+    "minimumExternalObservers": 3,
+    "minimumObserverQuorum": 3,
+    "probeIntervalSeconds": 3600
+  },
+  "candidates": [
+    {
+      "id": "oracle-seed-1",
+      "label": "pokoinpos-vm",
+      "host": "92.5.153.117",
+      "port": 43000,
+      "opsHealthUrl": "https://rpc.pokoin.com/health",
+      "enabled": true,
+      "fallback": true,
+      "status": "bootstrap",
+      "grandfathered": true,
+      "firstSeenAt": "2025-05-16T00:00:00Z",
+      "vettingStartedAt": "2025-05-16T00:00:00Z",
+      "vettingEndsAt": "2025-05-30T00:00:00Z"
+    },
+    {
+      "id": "oracle-seed-2",
+      "label": "pokoin-vm2",
+      "host": "130.162.242.213",
+      "port": 43001,
+      "opsHealthUrl": "",
+      "enabled": true,
+      "fallback": true,
+      "status": "bootstrap",
+      "grandfathered": true,
+      "firstSeenAt": "2025-05-16T00:00:00Z",
+      "vettingStartedAt": "2025-05-16T00:00:00Z",
+      "vettingEndsAt": "2025-05-30T00:00:00Z"
+    },
+    {
+      "id": "oracle-peer-3",
+      "label": "pokoin-vm3",
+      "host": "141.147.62.244",
+      "port": 43000,
+      "opsHealthUrl": "",
+      "enabled": true,
+      "fallback": false,
+      "status": "candidate",
+      "firstSeenAt": "2026-05-16T00:00:00Z",
+      "vettingStartedAt": "2026-05-16T00:00:00Z",
+      "vettingEndsAt": "2026-05-30T00:00:00Z"
+    },
+    {
+      "id": "oracle-peer-4",
+      "label": "pokoin-vm4",
+      "host": "92.5.23.133",
+      "port": 43001,
+      "opsHealthUrl": "",
+      "enabled": true,
+      "fallback": false,
+      "status": "candidate",
+      "firstSeenAt": "2026-05-16T00:00:00Z",
+      "vettingStartedAt": "2026-05-16T00:00:00Z",
+      "vettingEndsAt": "2026-05-30T00:00:00Z"
+    }
+  ]
+}

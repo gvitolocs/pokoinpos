@@ -30,6 +30,10 @@ Response fields:
 - `validatorStake`: this node miner's current spendable PKN balance used for weighted mining and payout.
 - `acceptedBlocks`: total accepted blocks.
 - `acceptedTxs`: total accepted transactions.
+- `lotteryAttempts`: local validator lottery attempts since process start.
+- `lotteryWins`: local validator lottery wins since process start.
+- `lotteryMisses`: local validator lottery losses with positive tickets since process start.
+- `lotteryNoTicket`: local attempts skipped because the validator had no tickets.
 
 Example:
 
@@ -74,6 +78,10 @@ Response fields:
 - `txCount`: transaction count in the committed ledger.
 - `acceptedBlocks`: total accepted blocks.
 - `minedBlocks`: blocks mined by this node.
+- `lotteryAttempts`: local validator lottery attempts since process start.
+- `lotteryWins`: local validator lottery wins since process start.
+- `lotteryMisses`: local validator lottery losses with positive tickets since process start.
+- `lotteryNoTicket`: local attempts skipped because the validator had no tickets.
 - `uptimeSeconds`: node runtime uptime in seconds.
 
 Example:
@@ -129,6 +137,10 @@ Metrics:
 - `pokoinpos_validator_stake`
 - `pokoinpos_blocks_accepted_total`
 - `pokoinpos_blocks_mined_total`
+- `pokoinpos_lottery_attempts_total`
+- `pokoinpos_lottery_wins_total`
+- `pokoinpos_lottery_misses_total`
+- `pokoinpos_lottery_no_ticket_total`
 - `pokoinpos_transactions_accepted_total`
 - `pokoinpos_ledger_transaction_count`
 - `pokoinpos_uptime_seconds`
@@ -175,10 +187,10 @@ Local node-host dashboard for operators running a PokoinPoS node.
 Authentication: none for read-only cards. Admin actions require:
 
 ```text
-Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
 ```
 
-The dashboard shows health, readiness, chain status, peer count, mempool depth, Prometheus metrics links, and guarded admin actions. The typo path `/deshboard` is also accepted for convenience.
+The dashboard shows health, readiness, chain status, peer count, mempool depth, Prometheus metrics links, and guarded operator actions. The typo path `/deshboard` is also accepted for convenience.
 
 Example:
 
@@ -238,7 +250,7 @@ Manually attempts mining for a specific slot. This endpoint is intended for cont
 Authentication:
 
 ```text
-Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
 ```
 
 Query parameters:
@@ -254,7 +266,7 @@ Example:
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer ${POKOINPOS_ADMIN_TOKEN}" \
+  -H "Authorization: Bearer ${POKOINPOS_OPERATOR_TOKEN}" \
   "http://127.0.0.1:8080/admin/mine?slot=1"
 ```
 
@@ -265,20 +277,20 @@ Protected capability check used by the local dashboard.
 Authentication:
 
 ```text
-Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
 ```
 
 Response fields:
 
-- `adminEnabled`: whether admin actions are available for the supplied token.
-- `actions`: enabled dashboard admin actions.
+- `adminEnabled`: whether operator actions are available for the supplied token.
+- `actions`: enabled dashboard operator actions.
 - `chainId`: EVM-compatible chain ID.
 - `networkId`: EVM-compatible network ID.
 
 Example:
 
 ```bash
-curl -H "Authorization: Bearer ${POKOINPOS_ADMIN_TOKEN}" \
+curl -H "Authorization: Bearer ${POKOINPOS_OPERATOR_TOKEN}" \
   http://127.0.0.1:8080/admin/dashboard/status
 ```
 
@@ -289,7 +301,7 @@ Withdraws this validator node's spendable PKN balance to a payout EVM wallet.
 Authentication:
 
 ```text
-Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
 ```
 
 Request body:
@@ -315,7 +327,7 @@ For a public site, prefer these calls:
 - Use `/chain/validators` to show the dynamic peer/validator list and payout balances.
 - Use `/endpoints` to render a live list of available node endpoints.
 
-Do not expose `POKOINPOS_ADMIN_TOKEN` in frontend code. If your site needs admin actions, call them through a private backend route.
+Do not expose `POKOINPOS_OPERATOR_TOKEN` in frontend code. If your site needs operator actions, call them through a private backend route.
 
 ## Adaptive Mining Notes
 

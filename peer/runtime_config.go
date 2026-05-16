@@ -10,8 +10,12 @@ import (
 type NodeConfig struct {
 	RunMode                  string
 	ListenPort               int
+	AdvertiseHost            string
 	JoinHost                 string
 	JoinPort                 int
+	BootstrapPeers           []PeerAddress
+	BootstrapManifestURL     string
+	BootstrapRefreshHours    int
 	OpsAddr                  string
 	AdminToken               string
 	RewardPayoutAddress      string
@@ -36,10 +40,24 @@ func LoadNodeConfigFromEnv() (NodeConfig, error) {
 	cfg := NodeConfig{
 		RunMode:    envOrDefault("POKOINPOS_RUN_MODE", "demo"),
 		ListenPort: envIntOrDefault("POKOINPOS_LISTEN_PORT", 43000),
-		JoinHost:   envOrDefault("POKOINPOS_JOIN_HOST", "127.0.0.1"),
-		JoinPort:   envIntOrDefault("POKOINPOS_JOIN_PORT", -1),
-		OpsAddr:    envOrDefault("POKOINPOS_OPS_ADDR", ":8080"),
-		AdminToken: envOrDefault("POKOINPOS_ADMIN_TOKEN", ""),
+		AdvertiseHost: envOrDefault(
+			"POKOINPOS_ADVERTISE_HOST",
+			envOrDefault("POKOINPOS_JOIN_HOST", "127.0.0.1"),
+		),
+		JoinHost: envOrDefault("POKOINPOS_JOIN_HOST", "127.0.0.1"),
+		JoinPort: envIntOrDefault("POKOINPOS_JOIN_PORT", -1),
+		BootstrapPeers: envBootstrapPeersOrDefault(
+			"POKOINPOS_BOOTSTRAP_PEERS",
+			envOrDefault("POKOINPOS_JOIN_HOST", "127.0.0.1"),
+			envIntOrDefault("POKOINPOS_JOIN_PORT", -1),
+		),
+		BootstrapManifestURL:  envOrDefault("POKOINPOS_BOOTSTRAP_MANIFEST_URL", "https://pokoin.com/bootstrap-peers.json"),
+		BootstrapRefreshHours: envIntOrDefault("POKOINPOS_BOOTSTRAP_REFRESH_INTERVAL_HOURS", 24),
+		OpsAddr:               envOrDefault("POKOINPOS_OPS_ADDR", ":8080"),
+		AdminToken: envOrDefault(
+			"POKOINPOS_OPERATOR_TOKEN",
+			envOrDefault("POKOINPOS_ADMIN_TOKEN", ""),
+		),
 		RewardPayoutAddress: strings.ToLower(
 			envOrDefault("POKOINPOS_REWARD_PAYOUT_ADDRESS", ""),
 		),
@@ -80,6 +98,9 @@ func LoadNodeConfigFromEnv() (NodeConfig, error) {
 	if cfg.ListenPort <= 0 {
 		return cfg, fmt.Errorf("POKOINPOS_LISTEN_PORT must be > 0")
 	}
+	if strings.TrimSpace(cfg.AdvertiseHost) == "" {
+		return cfg, fmt.Errorf("POKOINPOS_ADVERTISE_HOST must not be empty")
+	}
 	if cfg.SlotSeconds <= 0 {
 		return cfg, fmt.Errorf("POKOINPOS_SLOT_SECONDS must be > 0")
 	}
@@ -106,6 +127,9 @@ func LoadNodeConfigFromEnv() (NodeConfig, error) {
 	}
 	if cfg.ReconnectIntervalSeconds <= 0 {
 		return cfg, fmt.Errorf("POKOINPOS_RECONNECT_INTERVAL_SECONDS must be > 0")
+	}
+	if cfg.BootstrapRefreshHours <= 0 {
+		return cfg, fmt.Errorf("POKOINPOS_BOOTSTRAP_REFRESH_INTERVAL_HOURS must be > 0")
 	}
 	if cfg.FinalityDepth < 0 {
 		return cfg, fmt.Errorf("POKOINPOS_FINALITY_DEPTH must be >= 0")
@@ -170,4 +194,61 @@ func envAllocOrDefault(key string, fallback map[string]int) map[string]int {
 		alloc[address] = amount
 	}
 	return alloc
+}
+
+func envBootstrapPeersOrDefault(key string, joinHost string, joinPort int) []PeerAddress {
+	raw := strings.TrimSpace(os.Getenv(key))
+	peers := parseBootstrapPeers(raw)
+	if len(peers) > 0 {
+		return peers
+	}
+	if joinPort > 0 && strings.TrimSpace(joinHost) != "" {
+		return []PeerAddress{{
+			ID:   strconv.Itoa(joinPort),
+			Host: strings.TrimSpace(joinHost),
+			Port: joinPort,
+		}}
+	}
+	return nil
+}
+
+func parseBootstrapPeers(raw string) []PeerAddress {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	peers := make([]PeerAddress, 0)
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		host, portText, err := splitHostPortLenient(entry)
+		if err != nil {
+			continue
+		}
+		port, err := strconv.Atoi(portText)
+		if err != nil || port <= 0 {
+			continue
+		}
+		peers = append(peers, PeerAddress{
+			ID:   strconv.Itoa(port),
+			Host: host,
+			Port: port,
+		})
+	}
+	return peers
+}
+
+func splitHostPortLenient(value string) (string, string, error) {
+	parts := strings.Split(value, ":")
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("missing port")
+	}
+	port := parts[len(parts)-1]
+	host := strings.Join(parts[:len(parts)-1], ":")
+	host = strings.Trim(host, "[]")
+	if strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+		return "", "", fmt.Errorf("invalid host port")
+	}
+	return strings.TrimSpace(host), strings.TrimSpace(port), nil
 }

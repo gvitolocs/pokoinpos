@@ -1,0 +1,93 @@
+{
+  "candidates": [
+    {
+      "ageDays": 365,
+      "externalObservers": 3,
+      "grandfathered": true,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "label": "pokoinpos-vm",
+      "port": 43000,
+      "status": "bootstrap",
+      "uptimeRatio365d": 1.0,
+      "vettingUptimeRatio": 0.0
+    },
+    {
+      "ageDays": 365,
+      "externalObservers": 3,
+      "grandfathered": true,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "label": "pokoin-vm2",
+      "port": 43001,
+      "status": "bootstrap",
+      "uptimeRatio365d": 1.0,
+      "vettingUptimeRatio": 0.0
+    },
+    {
+      "ageDays": 0,
+      "externalObservers": 3,
+      "grandfathered": false,
+      "host": "141.147.62.244",
+      "id": "oracle-peer-3",
+      "label": "pokoin-vm3",
+      "port": 43000,
+      "status": "vetting",
+      "uptimeRatio365d": 1.0,
+      "vettingUptimeRatio": 1.0
+    },
+    {
+      "ageDays": 0,
+      "externalObservers": 3,
+      "grandfathered": false,
+      "host": "92.5.23.133",
+      "id": "oracle-peer-4",
+      "label": "pokoin-vm4",
+      "port": 43001,
+      "status": "vetting",
+      "uptimeRatio365d": 1.0,
+      "vettingUptimeRatio": 1.0
+    }
+  ],
+  "fallbackPeers": [
+    "92.5.153.117:43000",
+    "130.162.242.213:43001"
+  ],
+  "generatedAt": "2026-05-16T14:20:16Z",
+  "peers": [
+    {
+      "ageDays": 365,
+      "externalObservers": 3,
+      "grandfathered": true,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "label": "pokoinpos-vm",
+      "port": 43000,
+      "status": "bootstrap",
+      "uptimeRatio365d": 1.0,
+      "vettingUptimeRatio": 0.0
+    },
+    {
+      "ageDays": 365,
+      "externalObservers": 3,
+      "grandfathered": true,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "label": "pokoin-vm2",
+      "port": 43001,
+      "status": "bootstrap",
+      "uptimeRatio365d": 1.0,
+      "vettingUptimeRatio": 0.0
+    }
+  ],
+  "policy": {
+    "bootstrapMaturityDays": 365,
+    "eligibilityWindowDays": 365,
+    "minimumExternalObservers": 3,
+    "minimumUptimeRatio": 0.94,
+    "vettingDays": 14,
+    "vettingMinimumUptimeRatio": 0.95
+  },
+  "schemaVersion": 1,
+  "validForHours": 24
+}

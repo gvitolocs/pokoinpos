@@ -1,0 +1,15 @@
+rpc.pokoin.com {
+	encode zstd gzip
+
+	@cors_preflight method OPTIONS
+	respond @cors_preflight 204
+
+	header {
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type, Authorization"
+		Access-Control-Max-Age "86400"
+	}
+
+	reverse_proxy 127.0.0.1:8080
+}

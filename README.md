@@ -7,13 +7,34 @@ It started as an ADNO static PoS exercise and has been extended into a productio
 
 - Public website and wallet: `https://pokoin.com`
 - Wallet route: `https://pokoin.com/wallet`
+- Public scan/explorer UI: `https://pokoin.com/scan`
+- Explorer/static metadata host: `https://explorer.pokoin.com`
 - Public RPC: `https://rpc.pokoin.com/rpc`
-- Public health page: `https://rpc.pokoin.com/health`
-- Explorer: `https://explorer.pokoin.com`
+- Public health page: `https://pokoin.com/health`
+- Node health API: `https://rpc.pokoin.com/health`
 - Chain ID: `26062026` (`0x18dacca`)
 - Native currency: `PKN`
 
 The CardVault website and Pokoin Wallet now live in a single Flutter web app in the separate `cardvault` repository. This repository remains the source of truth for the chain, node runtime, RPC behavior, deployment scripts, and blockchain documentation.
+
+## Hosting Architecture
+
+Pokoin separates public web surfaces from node runtime services:
+
+- **Vercel hosts web/static surfaces**: `pokoin.com`, `pokoin.com/scan`,
+  `pokoin.com/health`, `pokoin.com/wallet`, `explorer.pokoin.com`,
+  `/wpkn/logo.png`, `/wpkn-reserve.json`, banners, favicons, and token metadata
+  assets.
+- **Oracle/Docker nodes host chain services**: P2P, node-local ops APIs, and the
+  public RPC gateway exposed at `rpc.pokoin.com`.
+- **Cloudflare DNS points frontend hostnames to Vercel**. `explorer.pokoin.com`
+  is a static/frontend hostname and should point to Vercel (`76.76.21.21`).
+- **RPC hostnames point to node/gateway infrastructure**. `rpc.pokoin.com`
+  should remain backed by one or more PokoinPoS nodes or a load-balanced RPC
+  gateway.
+
+This keeps the node focused on chain execution and RPC, while public websites,
+icons, reserve manifests, and explorer UI deploy through the Vercel web pipeline.
 
 ## Consensus Model
 
@@ -116,7 +137,7 @@ POKOINPOS_RUN_MODE=node \
 POKOINPOS_LISTEN_PORT=43000 \
 POKOINPOS_OPS_ADDR=:8080 \
 POKOINPOS_FINALITY_DEPTH=1 \
-POKOINPOS_ADMIN_TOKEN=change-me \
+POKOINPOS_OPERATOR_TOKEN= \
 go run .
 ```
 
@@ -153,13 +174,46 @@ docker compose --env-file deploy/env/peer2.env -f docker-compose.peer.yml up -d 
 
 This command builds the image and starts a peer that joins an existing node using:
 
+- `POKOINPOS_BOOTSTRAP_MANIFEST_URL`
+- `POKOINPOS_BOOTSTRAP_PEERS`
 - `POKOINPOS_JOIN_HOST`
 - `POKOINPOS_JOIN_PORT`
+- `POKOINPOS_ADVERTISE_HOST`
 
 The container now includes:
 
-- automatic seed reconnect attempts when disconnected
+- automatic seed and known-peer reconnect attempts when disconnected
+- advertised public peer addresses so nodes can continue syncing even if the original seed goes offline
 - persistent node state on disk (chain + miner identity + last slot)
+
+Set `POKOINPOS_ADVERTISE_HOST` to the public IP or DNS name other peers can reach
+on `POKOINPOS_LISTEN_PORT`; do not leave it as `127.0.0.1` for public peers.
+
+Set multiple stable seed nodes with `POKOINPOS_BOOTSTRAP_PEERS`, for example:
+
+```env
+POKOINPOS_BOOTSTRAP_PEERS=92.5.153.117:43000,130.162.242.213:43001
+```
+
+New nodes try every bootstrap peer and then continue with discovered peers, so the
+network can still be found if one Oracle seed is offline.
+
+By default, public nodes now fetch the dynamic bootstrap manifest first:
+
+```env
+POKOINPOS_BOOTSTRAP_MANIFEST_URL=https://pokoin.com/bootstrap-peers.json
+POKOINPOS_BOOTSTRAP_REFRESH_INTERVAL_HOURS=24
+```
+
+Bootstrap promotion is intentionally slow. New public nodes first spend 14 days
+in vetting and must stay online for at least `95%` of that vetting window. After
+vetting they can operate as regular peers, but they do not become bootstrap
+nodes until they are at least 365 days old and have at least `94%` observed
+uptime over the last 365 days. Uptime is not self-reported: a node needs
+observations from at least `3` other peers before it can qualify. The two current
+Oracle nodes are grandfathered as bootstrap peers, and node-local dashboards
+expose `/chain/bootstrap` so operators can see manifest refresh status, vetting
+state, peer age, external observer count, and uptime ratios.
 
 Set a unique state path per peer in env file:
 
@@ -195,6 +249,7 @@ Controls in env file:
 
 For a full production-style Docker deployment runbook (network/firewall/router guidance, reconnect behavior, and troubleshooting), see:
 
+- `docs/blockchain-update-workflow.md`
 - `docs/docker-hub-overview.md`
 
 ## Oracle Free Tier bootstrap (MVP)
