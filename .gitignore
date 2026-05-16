@@ -12,5 +12,9 @@ node_modules/
 .env.local
 .env.*.local
 secrets/
+keys/
+ssh-key*.key
+ssh-key*.pub
+*firebase-adminsdk*.json
 .pokoinpos-state/
 .pokoinpos-peer*-state/

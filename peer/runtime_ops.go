@@ -18,6 +18,7 @@ type OpsServer struct {
 	adminToken   string
 	evmChainID   int64
 	evmNetworkID string
+	bootstrap    *BootstrapRegistry
 }
 
 type EndpointDescription struct {
@@ -50,8 +51,8 @@ type JSONRPCError struct {
 	Message string `json:"message"`
 }
 
-func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64, evmNetworkID string) error {
-	srv := &OpsServer{peer: peer, adminToken: adminToken, evmChainID: evmChainID, evmNetworkID: evmNetworkID}
+func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64, evmNetworkID string, bootstrap *BootstrapRegistry) error {
+	srv := &OpsServer{peer: peer, adminToken: adminToken, evmChainID: evmChainID, evmNetworkID: evmNetworkID, bootstrap: bootstrap}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", srv.health)
 	mux.HandleFunc("/ready", srv.ready)
@@ -59,6 +60,7 @@ func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64
 	mux.HandleFunc("/deshboard", srv.dashboard)
 	mux.HandleFunc("/chain/status", srv.chainStatus)
 	mux.HandleFunc("/chain/validators", srv.validators)
+	mux.HandleFunc("/chain/bootstrap", srv.bootstrapStatus)
 	mux.HandleFunc("/metrics", srv.metrics)
 	mux.HandleFunc("/endpoints", srv.endpoints)
 	mux.HandleFunc("/explorer/blocks", srv.explorerBlocks)
@@ -122,6 +124,15 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 			},
 			{
 				Method:         http.MethodGet,
+				Path:           "/chain/bootstrap",
+				Summary:        "Dynamic bootstrap registry, vetting, uptime, and fallback peer status.",
+				Authentication: "none",
+				ContentType:    "application/json",
+				ResponseFields: []string{"manifestUrl", "lastRefreshAt", "lastError", "policy", "peers", "fallbackPeers"},
+				UseCases:       []string{"local dashboard", "bootstrap vetting visibility", "peer discovery diagnostics"},
+			},
+			{
+				Method:         http.MethodGet,
 				Path:           "/metrics",
 				Summary:        "Prometheus text metrics for monitoring and alerting.",
 				Authentication: "none",
@@ -142,7 +153,7 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Method:         http.MethodGet,
 				Path:           "/dashboard",
 				Summary:        "Local node-host dashboard for operators running this PokoinPoS node.",
-				Authentication: "none for read-only cards; admin actions require Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
+				Authentication: "none for read-only cards; operator actions require Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
 				ContentType:    "text/html; charset=utf-8",
 				UseCases:       []string{"local node hosting dashboard", "operator status checks", "guarded admin actions"},
 			},
@@ -178,7 +189,7 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Method:         http.MethodPost,
 				Path:           "/admin/mine",
 				Summary:        "Manually mine a requested slot; intended for controlled operations and smoke tests.",
-				Authentication: "Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
 				ContentType:    "application/json",
 				QueryParams:    []string{"slot: positive integer"},
 				ResponseFields: []string{"slot", "mined"},
@@ -188,7 +199,7 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Method:         http.MethodPost,
 				Path:           "/admin/mint",
 				Summary:        "Admin-only controlled PKN mint into a target account.",
-				Authentication: "Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
 				ContentType:    "application/json",
 				ResponseFields: []string{"hash", "to", "amount"},
 				UseCases:       []string{"treasury allocation", "wrapped-token reserve funding", "sale inventory setup"},
@@ -197,7 +208,7 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Method:         http.MethodPost,
 				Path:           "/admin/withdraw",
 				Summary:        "Withdraw this validator's spendable PKN balance to a payout EVM wallet address.",
-				Authentication: "Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
 				ContentType:    "application/json",
 				ResponseFields: []string{"hash", "to", "amount"},
 				UseCases:       []string{"validator payout", "operator rewards withdrawal"},
@@ -206,7 +217,7 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Method:         http.MethodGet,
 				Path:           "/admin/dashboard/status",
 				Summary:        "Protected dashboard capability check for the local node-host dashboard.",
-				Authentication: "Authorization: Bearer <POKOINPOS_ADMIN_TOKEN>",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
 				ContentType:    "application/json",
 				ResponseFields: []string{"adminEnabled", "actions", "chainId", "networkId"},
 				UseCases:       []string{"dashboard token validation", "operator admin readiness"},
@@ -854,6 +865,10 @@ func (s *OpsServer) health(w http.ResponseWriter, r *http.Request) {
 		"validatorStake":  s.peer.ValidatorStake(),
 		"acceptedBlocks":  s.peer.AcceptedBlocks(),
 		"acceptedTxs":     s.peer.AcceptedTransactions(),
+		"lotteryAttempts": s.peer.LotteryAttempts(),
+		"lotteryWins":     s.peer.LotteryWins(),
+		"lotteryMisses":   s.peer.LotteryMisses(),
+		"lotteryNoTicket": s.peer.LotteryNoTicket(),
 	}
 	writeJSON(w, http.StatusOK, body)
 }
@@ -892,6 +907,10 @@ func (s *OpsServer) chainStatus(w http.ResponseWriter, r *http.Request) {
 		"txCount":         s.peer.TxHistoryCount(),
 		"acceptedBlocks":  s.peer.AcceptedBlocks(),
 		"minedBlocks":     s.peer.MinedBlocks(),
+		"lotteryAttempts": s.peer.LotteryAttempts(),
+		"lotteryWins":     s.peer.LotteryWins(),
+		"lotteryMisses":   s.peer.LotteryMisses(),
+		"lotteryNoTicket": s.peer.LotteryNoTicket(),
 		"uptimeSeconds":   s.peer.UptimeSeconds(),
 	})
 }
@@ -904,6 +923,18 @@ func (s *OpsServer) validators(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"validators": s.peer.AuthorizedPeers(),
 	})
+}
+
+func (s *OpsServer) bootstrapStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	if s.bootstrap == nil {
+		writeJSONAny(w, http.StatusOK, BootstrapRegistryStatus{})
+		return
+	}
+	writeJSONAny(w, http.StatusOK, s.bootstrap.Status())
 }
 
 func (s *OpsServer) metrics(w http.ResponseWriter, r *http.Request) {
@@ -920,6 +951,10 @@ func (s *OpsServer) metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "pokoinpos_validator_stake %d\n", s.peer.ValidatorStake())
 	fmt.Fprintf(w, "pokoinpos_blocks_accepted_total %d\n", s.peer.AcceptedBlocks())
 	fmt.Fprintf(w, "pokoinpos_blocks_mined_total %d\n", s.peer.MinedBlocks())
+	fmt.Fprintf(w, "pokoinpos_lottery_attempts_total %d\n", s.peer.LotteryAttempts())
+	fmt.Fprintf(w, "pokoinpos_lottery_wins_total %d\n", s.peer.LotteryWins())
+	fmt.Fprintf(w, "pokoinpos_lottery_misses_total %d\n", s.peer.LotteryMisses())
+	fmt.Fprintf(w, "pokoinpos_lottery_no_ticket_total %d\n", s.peer.LotteryNoTicket())
 	fmt.Fprintf(w, "pokoinpos_transactions_accepted_total %d\n", s.peer.AcceptedTransactions())
 	fmt.Fprintf(w, "pokoinpos_ledger_transaction_count %d\n", s.peer.TxHistoryCount())
 	fmt.Fprintf(w, "pokoinpos_uptime_seconds %d\n", s.peer.UptimeSeconds())

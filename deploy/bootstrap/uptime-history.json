@@ -1,0 +1,254 @@
+{
+  "observations": [
+    {
+      "at": "2026-05-16T14:00:31Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "live": true,
+      "observerId": "oracle-peer-3",
+      "port": 43000,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:00:31Z",
+      "error": "",
+      "healthOk": true,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "live": true,
+      "observerId": "oracle-peer-3",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:00:31Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.23.133",
+      "id": "oracle-peer-4",
+      "live": true,
+      "observerId": "oracle-peer-3",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:00:31Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "live": true,
+      "observerId": "oracle-peer-4",
+      "port": 43000,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:00:31Z",
+      "error": "",
+      "healthOk": true,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "live": true,
+      "observerId": "oracle-peer-4",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:00:31Z",
+      "error": "",
+      "healthOk": true,
+      "host": "141.147.62.244",
+      "id": "oracle-peer-3",
+      "live": true,
+      "observerId": "oracle-peer-4",
+      "port": 43000,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:15Z",
+      "error": "",
+      "healthOk": true,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "live": true,
+      "observerId": "oracle-seed-1",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:15Z",
+      "error": "",
+      "healthOk": true,
+      "host": "141.147.62.244",
+      "id": "oracle-peer-3",
+      "live": true,
+      "observerId": "oracle-seed-1",
+      "port": 43000,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:15Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.23.133",
+      "id": "oracle-peer-4",
+      "live": true,
+      "observerId": "oracle-seed-1",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "live": true,
+      "observerId": "oracle-seed-2",
+      "port": 43000,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "141.147.62.244",
+      "id": "oracle-peer-3",
+      "live": true,
+      "observerId": "oracle-seed-2",
+      "port": 43000,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.23.133",
+      "id": "oracle-peer-4",
+      "live": true,
+      "observerId": "oracle-seed-2",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "live": true,
+      "observerId": "oracle-peer-3",
+      "port": 43000,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "live": true,
+      "observerId": "oracle-peer-3",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.23.133",
+      "id": "oracle-peer-4",
+      "live": true,
+      "observerId": "oracle-peer-3",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "live": true,
+      "observerId": "oracle-peer-4",
+      "port": 43000,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "live": true,
+      "observerId": "oracle-peer-4",
+      "port": 43001,
+      "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T14:20:16Z",
+      "error": "",
+      "healthOk": true,
+      "host": "141.147.62.244",
+      "id": "oracle-peer-3",
+      "live": true,
+      "observerId": "oracle-peer-4",
+      "port": 43000,
+      "tcpOk": true
+    }
+  ],
+  "schemaVersion": 1,
+  "summary": [
+    {
+      "currentStatus": "live",
+      "downtimeChecks": 0,
+      "host": "141.147.62.244",
+      "id": "oracle-peer-3",
+      "lastFailureAt": "",
+      "lastSeenAt": "2026-05-16T14:20:16Z",
+      "liveChecks": 4,
+      "port": 43000,
+      "totalChecks": 4,
+      "uptimeRatio": 1.0
+    },
+    {
+      "currentStatus": "live",
+      "downtimeChecks": 0,
+      "host": "92.5.23.133",
+      "id": "oracle-peer-4",
+      "lastFailureAt": "",
+      "lastSeenAt": "2026-05-16T14:20:16Z",
+      "liveChecks": 4,
+      "port": 43001,
+      "totalChecks": 4,
+      "uptimeRatio": 1.0
+    },
+    {
+      "currentStatus": "live",
+      "downtimeChecks": 0,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "lastFailureAt": "",
+      "lastSeenAt": "2026-05-16T14:20:16Z",
+      "liveChecks": 5,
+      "port": 43000,
+      "totalChecks": 5,
+      "uptimeRatio": 1.0
+    },
+    {
+      "currentStatus": "live",
+      "downtimeChecks": 0,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "lastFailureAt": "",
+      "lastSeenAt": "2026-05-16T14:20:16Z",
+      "liveChecks": 5,
+      "port": 43001,
+      "totalChecks": 5,
+      "uptimeRatio": 1.0
+    }
+  ],
+  "updatedAt": "2026-05-16T14:20:16Z"
+}

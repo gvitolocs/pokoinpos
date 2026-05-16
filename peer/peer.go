@@ -27,6 +27,10 @@ type Peer struct {
 	conns      map[string]net.Conn
 	// peerValidators maps network peer IDs to their advertised validator account.
 	peerValidators map[string]string
+	// peerAddresses maps peer IDs to advertised reachable TCP endpoints.
+	peerAddresses map[string]PeerAddress
+	// advertiseHost is the externally reachable host this peer announces.
+	advertiseHost string
 	// output serializes logging to stdout.
 	output chan string
 	// verbose controls per-message logs.
@@ -53,10 +57,14 @@ type Peer struct {
 	// Number of blocks to keep tentative before finalizing state-machine execution.
 	finalityDepth int
 	// Runtime counters for operations and observability.
-	startedAt      time.Time
-	acceptedBlocks atomic.Uint64
-	minedBlocks    atomic.Uint64
-	acceptedTxs    atomic.Uint64
+	startedAt       time.Time
+	acceptedBlocks  atomic.Uint64
+	minedBlocks     atomic.Uint64
+	acceptedTxs     atomic.Uint64
+	lotteryAttempts atomic.Uint64
+	lotteryWins     atomic.Uint64
+	lotteryMisses   atomic.Uint64
+	lotteryNoTicket atomic.Uint64
 }
 
 type MessageHistory struct {
@@ -66,8 +74,16 @@ type MessageHistory struct {
 }
 
 type connectPayload struct {
-	Peers     []string `json:"peers"`
-	Validator string   `json:"validator,omitempty"`
+	Peers     []string      `json:"peers"`
+	Addresses []PeerAddress `json:"addresses,omitempty"`
+	Address   string        `json:"address,omitempty"`
+	Validator string        `json:"validator,omitempty"`
+}
+
+type PeerAddress struct {
+	ID   string `json:"id"`
+	Host string `json:"host"`
+	Port int    `json:"port"`
 }
 
 func NewMessageHistory(msg *Message) *MessageHistory {
@@ -85,6 +101,7 @@ func NewPeer(listenport int) *Peer {
 	peer.listenport = listenport
 	peer.conns = make(map[string]net.Conn)
 	peer.peerValidators = make(map[string]string)
+	peer.peerAddresses = make(map[string]PeerAddress)
 	peer.output = make(chan string, 32)
 	peer.received = make(chan Message, 32)
 	peer.msgHistory = make(map[string]MessageHistory)
@@ -95,6 +112,17 @@ func NewPeer(listenport int) *Peer {
 	peer.startedAt = time.Now().UTC()
 	peer.finalityDepth = 0
 	return peer
+}
+
+func (p *Peer) SetAdvertiseHost(host string) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return
+	}
+	p.lock.Lock()
+	p.advertiseHost = host
+	p.peerAddresses[p.id] = PeerAddress{ID: p.id, Host: host, Port: p.listenport}
+	p.lock.Unlock()
 }
 
 // ConfigurePoS initializes blockchain state for Exercise 16.2.
@@ -130,6 +158,7 @@ func (p *Peer) StartWithConnection(addr string, port int) {
 	}
 	// Otherwise, a connection message was sent, and remaining connections can be established.
 	p.joinNetwork(addr, peers)
+	p.joinKnownPeers(p.knownPeerAddresses())
 	// Tell the whole network we joined (so peers that don't have us yet can add us).
 	p.floodJoin()
 }
@@ -169,13 +198,10 @@ func (p *Peer) listenForPeers(listener net.Listener) {
 }
 
 // Prepare communication with a peer. fromAccept is true when we accepted the connection (we are "server").
-func (p *Peer) prepareConnection(conn net.Conn, fromAccept bool) ([]string, error) {
+func (p *Peer) prepareConnection(conn net.Conn, fromAccept bool) ([]PeerAddress, error) {
 	reader := bufio.NewReader(conn)
 	// Handshake: announce our id, validator identity, and known peers.
-	payload, _ := json.Marshal(connectPayload{
-		Peers:     p.connectionIDs(),
-		Validator: p.validatorAccount(),
-	})
+	payload, _ := json.Marshal(p.connectPayload())
 	_ = p.writeMessage(conn, &Message{Type: helpers.CONNECT_MESSAGE_TYPE, From: p.id, Payload: payload})
 	// Wait for reply to establish their name.
 	msg, err := p.readMessage(reader)
@@ -186,6 +212,7 @@ func (p *Peer) prepareConnection(conn net.Conn, fromAccept bool) ([]string, erro
 	p.lock.Lock()
 	p.conns[msg.From] = conn
 	p.lock.Unlock()
+	p.recordPeerAddress(addressFromConnectPayload(msg.From, msg.Payload, conn.RemoteAddr()))
 	p.recordPeerValidator(msg.From, validatorFromConnectPayload(msg.Payload))
 	go p.handleDecode(msg.From, conn, reader)
 	// Catch-up: when we are the server (we accepted), send the new peer all messages we already have
@@ -194,7 +221,7 @@ func (p *Peer) prepareConnection(conn net.Conn, fromAccept bool) ([]string, erro
 		p.sendCatchUp(conn)
 	}
 	// Unmarshal the received list of peers the connection knew about.
-	peers := peersFromConnectPayload(msg.Payload)
+	peers := p.addressesFromConnectPayload(msg.Payload)
 	return peers, nil
 }
 
@@ -313,7 +340,25 @@ func (p *Peer) printOutput() {
 
 // Connect to another peer.
 func (p *Peer) Connect(addr string, port int) ([]string, error) {
-	conn, err := net.Dial(helpers.PROTOCOL, addr+":"+strconv.Itoa(port))
+	addresses, err := p.ConnectAddress(PeerAddress{Host: addr, Port: port})
+	if err != nil {
+		return nil, err
+	}
+	peers := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		if address.ID != "" {
+			peers = append(peers, address.ID)
+		}
+		p.recordPeerAddress(address)
+	}
+	return peers, nil
+}
+
+func (p *Peer) ConnectAddress(address PeerAddress) ([]PeerAddress, error) {
+	if address.Host == "" || address.Port <= 0 {
+		return nil, fmt.Errorf("invalid peer address %s:%d", address.Host, address.Port)
+	}
+	conn, err := net.Dial(helpers.PROTOCOL, net.JoinHostPort(address.Host, strconv.Itoa(address.Port)))
 	if err != nil {
 		return nil, err
 	}
@@ -329,18 +374,28 @@ func (p *Peer) Connect(addr string, port int) ([]string, error) {
 func (p *Peer) joinNetwork(addr string, peers []string) {
 	for _, peer := range peers {
 		if !p.hasConnection(peer) {
-			port, _ := strconv.Atoi(peer)
-			p.Connect(addr, port)
+			port, err := strconv.Atoi(peer)
+			if err != nil {
+				continue
+			}
+			_, _ = p.Connect(addr, port)
 		}
+	}
+}
+
+func (p *Peer) joinKnownPeers(addresses []PeerAddress) {
+	for _, address := range addresses {
+		if address.ID == "" || address.ID == p.id || p.hasConnection(address.ID) {
+			continue
+		}
+		p.recordPeerAddress(address)
+		_, _ = p.ConnectAddress(address)
 	}
 }
 
 // floodJoin announces to the network that we joined, so others can add us to their peer set.
 func (p *Peer) floodJoin() {
-	payload, _ := json.Marshal(connectPayload{
-		Peers:     []string{p.id},
-		Validator: p.validatorAccount(),
-	})
+	payload, _ := json.Marshal(p.connectPayload())
 	joinMsg := &Message{
 		Type:    helpers.JOIN_MESSAGE_TYPE,
 		MsgID:   "join-" + p.id,
@@ -367,17 +422,23 @@ func (p *Peer) sendCatchUp(conn net.Conn) {
 // handleJoin adds the new peer from a Join message to our peer set and connects if we didn't know them.
 func (p *Peer) handleJoin(msg *Message) {
 	newPeerID := msg.From
+	for _, address := range p.addressesFromConnectPayload(msg.Payload) {
+		p.recordPeerAddress(address)
+	}
 	p.recordPeerValidator(newPeerID, validatorFromConnectPayload(msg.Payload))
 	if p.hasConnection(newPeerID) {
 		return
 	}
-	// Connect so we have an open TCP connection (fully connected network).
-	port, err := strconv.Atoi(newPeerID)
-	if err != nil {
-		return
+	for _, address := range p.addressesFromConnectPayload(msg.Payload) {
+		if address.ID == newPeerID {
+			_, _ = p.ConnectAddress(address)
+			return
+		}
 	}
-	// Use same host as we use elsewhere (e.g. localhost in tests).
-	_, _ = p.Connect("localhost", port)
+	// Backwards-compatible fallback for local tests using port-only peer IDs.
+	if port, err := strconv.Atoi(newPeerID); err == nil {
+		_, _ = p.Connect("localhost", port)
+	}
 }
 
 // Send a message to another peer.
@@ -484,12 +545,19 @@ func (p *Peer) MineOneSlot(slot int) *account.Block {
 	if p.blockchain == nil || p.miner == nil || p.genesis == nil {
 		return nil
 	}
+	p.lotteryAttempts.Add(1)
 	accountName := p.miner.SafeEncode()
 	draw := account.ComputeLotteryDraw(p.genesis.Seed, slot, accountName)
 	tickets := account.LedgerFromBlockchain(p.blockchain, 0).LotteryTickets(accountName)
-	if tickets <= 0 || !account.WinsLottery(tickets, p.genesis.Hardness, draw) {
+	if tickets <= 0 {
+		p.lotteryNoTicket.Add(1)
 		return nil
 	}
+	if !account.WinsLottery(tickets, p.genesis.Hardness, draw) {
+		p.lotteryMisses.Add(1)
+		return nil
+	}
+	p.lotteryWins.Add(1)
 
 	parentHash := p.blockchain.BestLeafHash()
 	// Build a block from txs that are valid on top of current best chain state.
@@ -704,11 +772,59 @@ func (p *Peer) connectionIDs() []string {
 	return slices.Collect(maps.Keys(p.conns))
 }
 
+func (p *Peer) connectPayload() connectPayload {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	addresses := make([]PeerAddress, 0, len(p.peerAddresses)+1)
+	for _, address := range p.peerAddresses {
+		if address.ID != "" && address.Host != "" && address.Port > 0 {
+			addresses = append(addresses, address)
+		}
+	}
+	if p.advertiseHost != "" {
+		self := PeerAddress{ID: p.id, Host: p.advertiseHost, Port: p.listenport}
+		p.peerAddresses[p.id] = self
+		addresses = append(addresses, self)
+	}
+	return connectPayload{
+		Peers:     slices.Collect(maps.Keys(p.conns)),
+		Addresses: uniquePeerAddresses(addresses),
+		Validator: p.validatorAccountLocked(),
+	}
+}
+
+func (p *Peer) knownPeerAddresses() []PeerAddress {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	addresses := make([]PeerAddress, 0, len(p.peerAddresses))
+	for _, address := range p.peerAddresses {
+		if address.ID != "" && address.ID != p.id && address.Host != "" && address.Port > 0 {
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
+}
+
 func (p *Peer) validatorAccount() string {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	return p.validatorAccountLocked()
+}
+
+func (p *Peer) validatorAccountLocked() string {
 	if p.miner == nil {
 		return ""
 	}
 	return p.miner.SafeEncode()
+}
+
+func (p *Peer) recordPeerAddress(address PeerAddress) {
+	if address.ID == "" || address.Host == "" || address.Port <= 0 {
+		return
+	}
+	p.lock.Lock()
+	p.peerAddresses[address.ID] = address
+	p.lock.Unlock()
 }
 
 func (p *Peer) recordPeerValidator(peerID string, validator string) {
@@ -729,6 +845,79 @@ func peersFromConnectPayload(raw []byte) []string {
 	var peers []string
 	_ = json.Unmarshal(raw, &peers)
 	return peers
+}
+
+func (p *Peer) addressesFromConnectPayload(raw []byte) []PeerAddress {
+	var payload connectPayload
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		addresses := make([]PeerAddress, 0, len(payload.Addresses)+len(payload.Peers))
+		addresses = append(addresses, payload.Addresses...)
+		for _, peer := range payload.Peers {
+			if _, exists := findPeerAddress(addresses, peer); exists {
+				continue
+			}
+			if address, exists := p.peerAddress(peer); exists {
+				addresses = append(addresses, address)
+			}
+		}
+		return uniquePeerAddresses(addresses)
+	}
+	return nil
+}
+
+func (p *Peer) peerAddress(peerID string) (PeerAddress, bool) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	address, exists := p.peerAddresses[peerID]
+	return address, exists
+}
+
+func addressFromConnectPayload(peerID string, raw []byte, remote net.Addr) PeerAddress {
+	var payload connectPayload
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		for _, address := range payload.Addresses {
+			if address.ID == peerID && address.Host != "" && address.Port > 0 {
+				return address
+			}
+		}
+		if payload.Address != "" {
+			host, portText, err := net.SplitHostPort(payload.Address)
+			if err == nil {
+				if port, convErr := strconv.Atoi(portText); convErr == nil {
+					return PeerAddress{ID: peerID, Host: host, Port: port}
+				}
+			}
+		}
+	}
+	if tcp, ok := remote.(*net.TCPAddr); ok {
+		return PeerAddress{ID: peerID, Host: tcp.IP.String(), Port: tcp.Port}
+	}
+	return PeerAddress{ID: peerID}
+}
+
+func uniquePeerAddresses(addresses []PeerAddress) []PeerAddress {
+	seen := make(map[string]PeerAddress)
+	for _, address := range addresses {
+		if address.ID == "" || address.Host == "" || address.Port <= 0 {
+			continue
+		}
+		seen[address.ID] = address
+	}
+	out := make([]PeerAddress, 0, len(seen))
+	for _, address := range seen {
+		out = append(out, address)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func findPeerAddress(addresses []PeerAddress, id string) (PeerAddress, bool) {
+	for _, address := range addresses {
+		if address.ID == id {
+			return address, true
+		}
+	}
+	return PeerAddress{}, false
 }
 
 func validatorFromConnectPayload(raw []byte) string {
@@ -830,6 +1019,22 @@ func (p *Peer) AcceptedBlocks() uint64 {
 
 func (p *Peer) MinedBlocks() uint64 {
 	return p.minedBlocks.Load()
+}
+
+func (p *Peer) LotteryAttempts() uint64 {
+	return p.lotteryAttempts.Load()
+}
+
+func (p *Peer) LotteryWins() uint64 {
+	return p.lotteryWins.Load()
+}
+
+func (p *Peer) LotteryMisses() uint64 {
+	return p.lotteryMisses.Load()
+}
+
+func (p *Peer) LotteryNoTicket() uint64 {
+	return p.lotteryNoTicket.Load()
 }
 
 func (p *Peer) AcceptedTransactions() uint64 {

@@ -200,11 +200,11 @@ const nodeDashboardHTML = `<!doctype html>
         </div>
       </div>
       <div class="card">
-        <h2>Admin token</h2>
-        <p class="small">Stored only in this browser. Required for manual mine and mint actions.</p>
+        <h2>Operator token</h2>
+        <p class="small">Optional. Stored only in this browser and required only for guarded operator actions.</p>
         <div class="form-grid" style="margin-top:14px">
           <label>Bearer token
-            <input id="adminToken" type="password" autocomplete="off" placeholder="POKOINPOS_ADMIN_TOKEN">
+            <input id="adminToken" type="password" autocomplete="off" placeholder="POKOINPOS_OPERATOR_TOKEN">
           </label>
           <div class="toolbar">
             <button id="saveToken">Save token</button>
@@ -225,9 +225,10 @@ const nodeDashboardHTML = `<!doctype html>
           <div class="ring" id="peerRing" style="--peer-angle: 0deg"></div>
         </div>
         <div class="list">
-          <div class="row"><span>Remote peers</span><strong id="remotePeers">0</strong></div>
-          <div class="row"><span>This node</span><strong>1</strong></div>
-          <div class="row"><span>Total visible nodes</span><strong id="totalNodes">1</strong></div>
+          <div class="row"><span>Vetting nodes</span><strong id="vettingNodes">0</strong></div>
+          <div class="row"><span>Regular peers</span><strong id="regularPeers">0</strong></div>
+          <div class="row"><span>Bootstrap peers</span><strong id="bootstrapPeers">0</strong></div>
+          <div class="row"><span>Live P2P links</span><strong id="remotePeers">0</strong></div>
           <div class="row"><span>Authorized validators</span><strong id="authorizedValidators">0</strong></div>
         </div>
       </div>
@@ -276,6 +277,12 @@ const nodeDashboardHTML = `<!doctype html>
     </section>
 
     <section class="card" style="margin-top:14px">
+      <h2>Bootstrap registry</h2>
+      <p class="small">Shows manifest peers, vetting stage, observed uptime, and fallback discovery health for this node.</p>
+      <div class="list" id="bootstrapList" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card" style="margin-top:14px">
       <h2>Endpoint status</h2>
       <div class="list" id="endpointList"></div>
     </section>
@@ -283,7 +290,7 @@ const nodeDashboardHTML = `<!doctype html>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const state = { health: null, ready: null, chain: null, endpoints: [], validators: [] };
+    const state = { health: null, ready: null, chain: null, endpoints: [], validators: [], bootstrap: null };
     const metricDefs = [
       ["Height", "height", "Best chain height"],
       ["Committed", "committedHeight", "Finalized height"],
@@ -345,11 +352,18 @@ const nodeDashboardHTML = `<!doctype html>
       }).join("");
 
       const peerCount = Number(chain.peerCount || 0);
-      const totalNodes = peerCount + 1;
-      const peerAngle = totalNodes > 0 ? Math.round((peerCount / totalNodes) * 360) : 0;
+      const candidates = (state.bootstrap?.candidates && state.bootstrap.candidates.length) ? state.bootstrap.candidates : (state.bootstrap?.peers || []);
+      const vettingNodes = candidates.filter((p) => (p.status || "peer") === "vetting").length;
+      const regularPeers = candidates.filter((p) => ["peer", "candidate"].includes(p.status || "peer")).length;
+      const bootstrapPeers = candidates.filter((p) => (p.status || "peer") === "bootstrap").length;
+      const observerCount = candidates.reduce((max, p) => Math.max(max, Number(p.externalObservers || 0)), 0);
+      const totalRegistryNodes = Math.max(candidates.length, 1);
+      const peerAngle = totalRegistryNodes > 0 ? Math.round(((regularPeers + bootstrapPeers) / totalRegistryNodes) * 360) : 0;
       $("peerRing").style.setProperty("--peer-angle", peerAngle + "deg");
+      $("vettingNodes").textContent = vettingNodes;
+      $("regularPeers").textContent = regularPeers;
+      $("bootstrapPeers").textContent = bootstrapPeers;
       $("remotePeers").textContent = peerCount;
-      $("totalNodes").textContent = totalNodes;
       $("authorizedValidators").textContent = state.validators.filter((v) => v.authorized).length;
 
       const detailRows = [
@@ -358,7 +372,9 @@ const nodeDashboardHTML = `<!doctype html>
         ["Finality depth", chain.finalityDepth ?? "-"],
         ["Accepted txs", state.health?.acceptedTxs ?? "-"],
         ["RPC URL", location.origin + "/rpc"],
-        ["Dashboard URL", location.origin + "/dashboard"]
+        ["Dashboard URL", location.origin + "/dashboard"],
+        ["Bootstrap manifest", state.bootstrap?.manifestUrl || "-"],
+        ["External observers", observerCount + " / " + (state.bootstrap?.policy?.minimumExternalObservers || 3)]
       ];
       $("detailsList").innerHTML = detailRows.map(([k, v]) => '<div class="row"><span>' + k + '</span><strong>' + v + '</strong></div>').join("");
 
@@ -373,22 +389,36 @@ const nodeDashboardHTML = `<!doctype html>
         const locality = v.local ? "local" : (v.connected ? "connected" : "known");
         return '<div class="row"><span><strong>Peer ' + v.peerId + ' · ' + status + '</strong><br><span class="small">' + locality + ' · ' + v.validator + '</span></span><strong>' + v.stake + ' PKN</strong></div>';
       }).join("") : '<div class="row"><span>No validator identities advertised yet.</span><strong>-</strong></div>';
+
+      const bootstrap = state.bootstrap || {};
+      const peers = (bootstrap.candidates && bootstrap.candidates.length) ? bootstrap.candidates : (bootstrap.peers || []);
+      const policy = bootstrap.policy || {};
+      const header = '<div class="row"><span>Policy</span><strong>' + (policy.minimumUptimeRatio ? 'vetting ' + Math.round(policy.vettingMinimumUptimeRatio * 100) + '% / ' + policy.vettingDays + 'd · bootstrap ' + Math.round(policy.minimumUptimeRatio * 100) + '% / ' + policy.bootstrapMaturityDays + 'd · observers ' + (policy.minimumExternalObservers || 3) : '-') + '</strong></div>';
+      const error = bootstrap.lastError ? '<div class="row"><span>Last manifest error</span><strong>' + bootstrap.lastError + '</strong></div>' : '';
+      const rows = peers.length ? peers.map((p) => {
+        const ratio = Math.round(Number(p.uptimeRatio365d || 0) * 10000) / 100;
+        const vetting = Math.round(Number(p.vettingUptimeRatio || 0) * 10000) / 100;
+        return '<div class="row"><span><strong>' + p.host + ':' + p.port + '</strong><br><span class="small">' + (p.label || p.id || 'bootstrap peer') + ' · ' + (p.status || 'peer') + ' · age ' + (p.ageDays || 0) + 'd · vetting ' + vetting + '% · observers ' + (p.externalObservers || 0) + '</span></span><strong>' + ratio + '% / 365d</strong></div>';
+      }).join("") : '<div class="row"><span>No manifest peers loaded yet. Static fallback remains active.</span><strong>-</strong></div>';
+      $("bootstrapList").innerHTML = header + error + rows;
     }
 
     async function refresh() {
       try {
-        const [health, ready, chain, endpoints, validators] = await Promise.all([
+        const [health, ready, chain, endpoints, validators, bootstrap] = await Promise.all([
           getJSON("/health"),
           getJSON("/ready").catch((err) => ({ status: err.message, ready: false })),
           getJSON("/chain/status"),
           getJSON("/endpoints"),
-          getJSON("/chain/validators").catch(() => ({ validators: [] }))
+          getJSON("/chain/validators").catch(() => ({ validators: [] })),
+          getJSON("/chain/bootstrap").catch(() => ({}))
         ]);
         state.health = health;
         state.ready = ready;
         state.chain = chain;
         state.endpoints = endpoints.endpoints || [];
         state.validators = validators.validators || [];
+        state.bootstrap = bootstrap || {};
         render();
       } catch (err) {
         $("liveDot").className = "dot bad";
