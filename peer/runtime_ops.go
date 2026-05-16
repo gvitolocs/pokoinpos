@@ -68,6 +68,7 @@ func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64
 	mux.HandleFunc("/explorer/tx/", srv.explorerTx)
 	mux.HandleFunc("/explorer/address/", srv.explorerAddress)
 	mux.HandleFunc("/explorer/search", srv.explorerSearch)
+	mux.HandleFunc("/", srv.root)
 	mux.HandleFunc("/rpc", srv.rpc)
 	mux.HandleFunc("/admin/dashboard/status", srv.adminDashboardStatus)
 	mux.HandleFunc("/admin/mine", srv.mineSlot)
@@ -75,6 +76,19 @@ func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64
 	mux.HandleFunc("/admin/withdraw", srv.withdraw)
 	logEvent("ops_server_starting", map[string]any{"addr": addr})
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *OpsServer) root(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		setRPCHeaders(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method == http.MethodPost {
+		s.rpc(w, r)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
