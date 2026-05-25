@@ -25,6 +25,7 @@ type Block struct {
 	MetaData        string // The block metadata. For Genesis, this is settings. Otherwise, transactions.
 	ParentHash      string // The hash of the parent block.
 	Signature       string // A signature on the block for authentication from the winner.
+	LotteryProof    string // A signature over (seed, slot) used to derive the lottery draw.
 }
 
 func NewBlock(winner *Account, slot int, draw int, parentHash string, metaData string) *Block {
@@ -42,8 +43,11 @@ func NewBlock(winner *Account, slot int, draw int, parentHash string, metaData s
 }
 
 func (b *Block) marshalForSignature() []byte {
-	msg, err := json.Marshal([]string{b.Type, b.VerificationKey, strconv.Itoa(b.Slot),
-		strconv.Itoa(b.Draw), b.ParentHash})
+	fields := []string{b.Type, b.VerificationKey, strconv.Itoa(b.Slot), strconv.Itoa(b.Draw), b.ParentHash}
+	if b.LotteryProof != "" {
+		fields = append(fields, b.LotteryProof)
+	}
+	msg, err := json.Marshal(fields)
 	if err != nil {
 		return []byte{}
 	}
@@ -67,6 +71,44 @@ func (b *Block) GetBlockHash() [32]byte {
 func (b *Block) Sign(signer *Account) string {
 	signature := dissycrypto.RSASign(b.marshalForSignature(), signer.d, signer.n)
 	return encode(signature.Bytes())
+}
+
+func lotteryProofMessage(seed int, slot int) []byte {
+	msg, err := json.Marshal([]string{"pokoin-lottery-v1", strconv.Itoa(seed), strconv.Itoa(slot)})
+	if err != nil {
+		return []byte{}
+	}
+	return msg
+}
+
+func SignLotteryProof(seed int, slot int, signer *Account) string {
+	if signer == nil {
+		return ""
+	}
+	signature := dissycrypto.RSASign(lotteryProofMessage(seed, slot), signer.d, signer.n)
+	return encode(signature.Bytes())
+}
+
+func ComputeLotteryDrawFromProof(proof string) (int, bool) {
+	raw, err := decode(proof)
+	if err != nil || len(raw) == 0 {
+		return 0, false
+	}
+	hash := sha256.Sum256(raw)
+	v := binary.BigEndian.Uint64(hash[:8])
+	return int(v % LOTTERY_DRAW_RANGE), true
+}
+
+func VerifyLotteryProof(seed int, slot int, accountName string, proof string) bool {
+	signature, err := decode(proof)
+	if err != nil {
+		return false
+	}
+	publicKey, err := decode(accountName)
+	if err != nil {
+		return false
+	}
+	return dissycrypto.VerifySignature(lotteryProofMessage(seed, slot), signature, string(publicKey))
 }
 
 type Blockchain struct {
@@ -123,13 +165,11 @@ func NewBlockchainWithGenesis(genesis *GenesisMetaData) *Blockchain {
 		meta = []byte("{}")
 	}
 	b.Blocks = append(b.Blocks, Block{
-		BLOCK_TYPE,
-		"",
-		0,
-		0,
-		encode(meta),
-		NO_PARENT_HASH,
-		"",
+		Type:       BLOCK_TYPE,
+		Slot:       0,
+		Draw:       0,
+		MetaData:   encode(meta),
+		ParentHash: NO_PARENT_HASH,
 	})
 	return b
 }
@@ -173,6 +213,92 @@ func WinsLottery(tickets int, hardness int, draw int) bool {
 	// More tickets => higher threshold => higher chance to win.
 	threshold := uint64(hardness) * uint64(tickets)
 	return uint64(draw) < threshold
+}
+
+func EffectiveHardnessForMining(blocks []Block, genesis *GenesisMetaData, candidateTxCount int) int {
+	if genesis == nil {
+		return 0
+	}
+	applyDefaultDynamicHardnessConfig(genesis)
+	if len(blocks) == 0 || genesis.DynamicHardnessForkHeight <= DYNAMIC_HARDNESS_DISABLED || len(blocks) < genesis.DynamicHardnessForkHeight {
+		return clampHardness(genesis.Hardness, genesis.DynamicHardnessMin, genesis.DynamicHardnessMax)
+	}
+	return effectiveDynamicHardness(blocks, genesis, candidateTxCount)
+}
+
+func effectiveHardnessForBlock(nodes map[string]*Block, genesis *GenesisMetaData, block *Block) int {
+	if genesis == nil || block == nil {
+		return 0
+	}
+	parentBlocks := getBlocksFromLongestBranch(nodes, block.ParentHash)
+	txs, err := DecodeBlockTransactions(block.MetaData)
+	if err != nil {
+		txs = nil
+	}
+	return EffectiveHardnessForMining(blockPointersToValues(parentBlocks), genesis, len(txs))
+}
+
+func effectiveDynamicHardness(parentBlocks []Block, genesis *GenesisMetaData, candidateTxCount int) int {
+	target := genesis.IdleBlockTargetSlots
+	if candidateTxCount > 0 {
+		target = genesis.FastBlockTargetSlots
+	}
+	if target <= 0 {
+		target = 1
+	}
+	window := genesis.DynamicHardnessWindow
+	if window <= 0 {
+		window = DYNAMIC_HARDNESS_DEFAULT_WINDOW
+	}
+	avgInterval := averageRecentSlotInterval(parentBlocks, window)
+	if avgInterval <= 0 {
+		return clampHardness(genesis.Hardness, genesis.DynamicHardnessMin, genesis.DynamicHardnessMax)
+	}
+	adjusted := int((int64(genesis.Hardness) * int64(avgInterval)) / int64(target))
+	return clampHardness(adjusted, genesis.DynamicHardnessMin, genesis.DynamicHardnessMax)
+}
+
+func averageRecentSlotInterval(blocks []Block, window int) int {
+	if len(blocks) < 2 {
+		return 0
+	}
+	if window < 1 {
+		window = 1
+	}
+	start := len(blocks) - 1 - window
+	if start < 0 {
+		start = 0
+	}
+	total := 0
+	count := 0
+	for i := start + 1; i < len(blocks); i++ {
+		delta := blocks[i].Slot - blocks[i-1].Slot
+		if delta <= 0 {
+			continue
+		}
+		total += delta
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return (total + count/2) / count
+}
+
+func clampHardness(value int, min int, max int) int {
+	if min <= 0 {
+		min = 1
+	}
+	if max < min {
+		max = min
+	}
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
 }
 
 // BestLeafHash returns hash of current best/longest branch leaf.
@@ -232,11 +358,25 @@ func (b *Blockchain) AddBlock(block *Block) bool {
 	if tickets <= 0 {
 		return false
 	}
-	expectedDraw := ComputeLotteryDraw(genesis.Seed, block.Slot, block.VerificationKey)
-	if block.Draw != expectedDraw {
-		return false
+	if block.LotteryProof != "" {
+		if !VerifyLotteryProof(genesis.Seed, block.Slot, block.VerificationKey, block.LotteryProof) {
+			return false
+		}
+		expectedDraw, ok := ComputeLotteryDrawFromProof(block.LotteryProof)
+		if !ok || block.Draw != expectedDraw {
+			return false
+		}
+	} else {
+		expectedDraw := ComputeLotteryDraw(genesis.Seed, block.Slot, block.VerificationKey)
+		if block.Draw != expectedDraw {
+			return false
+		}
 	}
-	if !WinsLottery(tickets, genesis.Hardness, block.Draw) {
+	hardness := effectiveHardnessForBlock(nodes, genesis, block)
+	if !parentLedger.IsValidator(block.VerificationKey) && parentLedger.GetBalance(block.VerificationKey) == 0 && genesis.Hardness > hardness {
+		hardness = genesis.Hardness
+	}
+	if !WinsLottery(tickets, hardness, block.Draw) {
 		return false
 	}
 
@@ -420,6 +560,16 @@ func getBlocksFromLongestBranch(nodes map[string]*Block, leaf string) []*Block {
 	return blocks
 }
 
+func blockPointersToValues(blocks []*Block) []Block {
+	out := make([]Block, 0, len(blocks))
+	for _, block := range blocks {
+		if block != nil {
+			out = append(out, *block)
+		}
+	}
+	return out
+}
+
 func getGenesisHash(nodes map[string]*Block) string {
 	for hash, block := range nodes {
 		if block.ParentHash == NO_PARENT_HASH {
@@ -442,6 +592,10 @@ func decodeGenesisFromMeta(meta string) (*GenesisMetaData, error) {
 		return nil, err
 	}
 	return &genesis, nil
+}
+
+func DecodeGenesisFromBlock(block Block) (*GenesisMetaData, error) {
+	return decodeGenesisFromMeta(block.MetaData)
 }
 
 func buildLedgerAtHash(nodes map[string]*Block, hash string) *Ledger {
@@ -491,10 +645,16 @@ func buildLedgerFromBlocks(blocks []*Block) *Ledger {
 
 // NewCandidateBlock builds a block for a winner from parent hash and tx list.
 func NewCandidateBlock(winner *Account, slot int, parentHash string, txs []SignedTransaction, seed int) *Block {
-	accountName := winner.SafeEncode()
-	draw := ComputeLotteryDraw(seed, slot, accountName)
+	proof := SignLotteryProof(seed, slot, winner)
+	draw, ok := ComputeLotteryDrawFromProof(proof)
+	if !ok {
+		draw = ComputeLotteryDraw(seed, slot, winner.SafeEncode())
+	}
 	meta := EncodeBlockTransactions(txs)
-	return NewBlock(winner, slot, draw, parentHash, meta)
+	block := NewBlock(winner, slot, draw, parentHash, meta)
+	block.LotteryProof = proof
+	block.Signature = block.Sign(winner)
+	return block
 }
 
 func (b *Block) String() string {

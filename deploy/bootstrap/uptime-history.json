@@ -197,6 +197,54 @@
       "observerId": "oracle-peer-4",
       "port": 43000,
       "tcpOk": true
+    },
+    {
+      "at": "2026-05-16T21:24:55Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.153.117",
+      "id": "oracle-seed-1",
+      "live": true,
+      "observerId": "local-rollout-check",
+      "port": 43000,
+      "tcpOk": true,
+      "version": "PokoinPoS/v0.2.0"
+    },
+    {
+      "at": "2026-05-16T21:24:55Z",
+      "error": "",
+      "healthOk": true,
+      "host": "130.162.242.213",
+      "id": "oracle-seed-2",
+      "live": true,
+      "observerId": "local-rollout-check",
+      "port": 43001,
+      "tcpOk": true,
+      "version": ""
+    },
+    {
+      "at": "2026-05-16T21:24:55Z",
+      "error": "",
+      "healthOk": true,
+      "host": "141.147.62.244",
+      "id": "oracle-peer-3",
+      "live": true,
+      "observerId": "local-rollout-check",
+      "port": 43000,
+      "tcpOk": true,
+      "version": ""
+    },
+    {
+      "at": "2026-05-16T21:24:55Z",
+      "error": "",
+      "healthOk": true,
+      "host": "92.5.23.133",
+      "id": "oracle-peer-4",
+      "live": true,
+      "observerId": "local-rollout-check",
+      "port": 43001,
+      "tcpOk": true,
+      "version": ""
     }
   ],
   "schemaVersion": 1,
@@ -207,10 +255,10 @@
       "host": "141.147.62.244",
       "id": "oracle-peer-3",
       "lastFailureAt": "",
-      "lastSeenAt": "2026-05-16T14:20:16Z",
-      "liveChecks": 4,
+      "lastSeenAt": "2026-05-16T21:24:55Z",
+      "liveChecks": 5,
       "port": 43000,
-      "totalChecks": 4,
+      "totalChecks": 5,
       "uptimeRatio": 1.0
     },
     {
@@ -219,10 +267,10 @@
       "host": "92.5.23.133",
       "id": "oracle-peer-4",
       "lastFailureAt": "",
-      "lastSeenAt": "2026-05-16T14:20:16Z",
-      "liveChecks": 4,
+      "lastSeenAt": "2026-05-16T21:24:55Z",
+      "liveChecks": 5,
       "port": 43001,
-      "totalChecks": 4,
+      "totalChecks": 5,
       "uptimeRatio": 1.0
     },
     {
@@ -231,10 +279,10 @@
       "host": "92.5.153.117",
       "id": "oracle-seed-1",
       "lastFailureAt": "",
-      "lastSeenAt": "2026-05-16T14:20:16Z",
-      "liveChecks": 5,
+      "lastSeenAt": "2026-05-16T21:24:55Z",
+      "liveChecks": 6,
       "port": 43000,
-      "totalChecks": 5,
+      "totalChecks": 6,
       "uptimeRatio": 1.0
     },
     {
@@ -243,12 +291,12 @@
       "host": "130.162.242.213",
       "id": "oracle-seed-2",
       "lastFailureAt": "",
-      "lastSeenAt": "2026-05-16T14:20:16Z",
-      "liveChecks": 5,
+      "lastSeenAt": "2026-05-16T21:24:55Z",
+      "liveChecks": 6,
       "port": 43001,
-      "totalChecks": 5,
+      "totalChecks": 6,
       "uptimeRatio": 1.0
     }
   ],
-  "updatedAt": "2026-05-16T14:20:16Z"
+  "updatedAt": "2026-05-16T21:24:55Z"
 }

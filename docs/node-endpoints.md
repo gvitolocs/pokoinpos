@@ -202,7 +202,8 @@ Use `http://127.0.0.1:8080/dashboard` when running with the default ops port. Th
 
 ### `POST /rpc`
 
-EVM-style JSON-RPC compatibility endpoint for MetaMask-style wallets.
+EVM-style JSON-RPC compatibility endpoint for MetaMask-style wallets and the
+first smart-contract tooling surface.
 
 Authentication: none.
 
@@ -218,6 +219,9 @@ Supported wallet methods include:
 - `eth_getBalance`
 - `eth_getTransactionCount`
 - `eth_getCode`
+- `eth_getStorageAt`
+- `eth_call`
+- `eth_getLogs`
 - `eth_getTransactionByHash`
 - `eth_getTransactionReceipt`
 - `eth_mining`
@@ -233,6 +237,13 @@ Supported wallet methods include:
 See `docs/wallet-compatibility.md` for MetaMask setup values.
 See `docs/explorer-api.md` for block explorer endpoints.
 
+Data-bearing signed EVM transactions are executed through the embedded EVM
+runtime during PoS block replay. Contract bytecode, storage, execution receipts,
+logs, and contract creation addresses are persisted in the deterministic ledger.
+This is the compatibility foundation for Uniswap/Pancake-style deployment tests,
+though full dApp compatibility still depends on the exact RPC methods required by
+the deploy tooling.
+
 Example:
 
 ```bash
@@ -241,7 +252,149 @@ curl -s http://127.0.0.1:8080/rpc \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
 ```
 
+### `GET /chain/nfts`
+
+Lists native Pokoin NFT tokens from the current best chain.
+
+Authentication: none.
+
+Query parameters:
+
+- `owner`: optional account or wallet address filter.
+
+Response fields:
+
+- `count`: number of returned tokens.
+- `tokens`: native NFT token records.
+
+Each token includes:
+
+- `collectionId`
+- `tokenId`
+- `owner`
+- `minter`
+- `metadataUri`
+- `metadataHash`
+- `imageUri`
+- `mintTx`
+- `lastTx`
+
+Examples:
+
+```bash
+curl http://127.0.0.1:8080/chain/nfts
+curl "http://127.0.0.1:8080/chain/nfts?owner=0x1111111111111111111111111111111111111111"
+```
+
+### `GET /chain/nfts/{collectionId}/{tokenId}`
+
+Returns one native Pokoin NFT by collection and token ID.
+
+Authentication: none.
+
+Example:
+
+```bash
+curl http://127.0.0.1:8080/chain/nfts/cards/001
+```
+
+### `GET /chain/nfts/owner/{account}`
+
+Lists native Pokoin NFTs owned by an account.
+
+Authentication: none.
+
+Example:
+
+```bash
+curl http://127.0.0.1:8080/chain/nfts/owner/0x1111111111111111111111111111111111111111
+```
+
+### `GET /chain/swap/pools`
+
+Lists native PokoinSwap AMM pools from the current best chain.
+
+Authentication: none.
+
+Response fields:
+
+- `count`: number of pools.
+- `pools`: pool records with `id`, `assetA`, `assetB`, reserves, fee bps, and last transaction IDs.
+
+Example:
+
+```bash
+curl http://127.0.0.1:8080/chain/swap/pools
+```
+
+### `GET /chain/swap/pools/{poolId}`
+
+Returns a single native PokoinSwap AMM pool, for example `PKN-WPKN`.
+
+Authentication: none.
+
+Example:
+
+```bash
+curl http://127.0.0.1:8080/chain/swap/pools/PKN-WPKN
+```
+
+### `GET /chain/swap/balances/{address}`
+
+Returns native PKN plus internal accounting asset balances for an account.
+
+Authentication: none.
+
+Example:
+
+```bash
+curl http://127.0.0.1:8080/chain/swap/balances/0x1111111111111111111111111111111111111111
+```
+
+### `GET /chain/swap/quote`
+
+Returns a deterministic constant-product quote for a pool.
+
+Authentication: none.
+
+Query parameters:
+
+- `pool`: pool ID, for example `PKN-WPKN`.
+- `assetIn`: input asset, for example `PKN` or `wPKN`.
+- `amountIn`: whole-unit input amount.
+
+Example:
+
+```bash
+curl "http://127.0.0.1:8080/chain/swap/quote?pool=PKN-WPKN&assetIn=PKN&amountIn=100"
+```
+
 ## Admin Endpoints
+
+### `GET /admin/mempool`
+
+Returns node-local pending transaction summaries for operator diagnostics. This
+endpoint is for SSH/local or private operator use only; do not expose mempool
+contents publicly.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
+```
+
+Response fields:
+
+- `count`: number of pending transactions in this node's local mempool.
+- `transactions`: pending transaction summaries with hash, kind, sender,
+  recipient, nonce, flags, and `bestLedgerWouldApply`.
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer ${POKOINPOS_OPERATOR_TOKEN}" \
+  http://127.0.0.1:8080/admin/mempool
+```
 
 ### `POST /admin/mine?slot=<n>`
 
@@ -318,6 +471,109 @@ Response fields:
 
 Validator authorization is separate from spendable balance. A validator can withdraw all spendable PKN and remain authorized as long as it continues participating as a P2P node.
 
+### `POST /admin/nft/mint`
+
+Queues a native NFT mint transaction for block inclusion.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
+```
+
+Request body:
+
+```json
+{
+  "collectionId": "cards",
+  "tokenId": "001",
+  "owner": "0x1111111111111111111111111111111111111111",
+  "metadataUri": "ipfs://metadata",
+  "metadataHash": "sha256:...",
+  "imageUri": "ipfs://image"
+}
+```
+
+### `POST /admin/nft/transfer`
+
+Queues a native NFT transfer from this validator's owned NFT inventory.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
+```
+
+Request body:
+
+```json
+{"collectionId":"cards","tokenId":"001","to":"0x2222222222222222222222222222222222222222"}
+```
+
+### `POST /admin/assets/credit`
+
+Queues an operator transaction that credits an internal accounting asset such as `wPKN` to an account.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
+```
+
+Request body:
+
+```json
+{"asset":"wPKN","account":"0x1111111111111111111111111111111111111111","amount":100}
+```
+
+### `POST /admin/assets/debit`
+
+Queues an operator transaction that debits an internal accounting asset from an account.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
+```
+
+Request body:
+
+```json
+{"asset":"wPKN","account":"0x1111111111111111111111111111111111111111","amount":100}
+```
+
+### `POST /admin/swap/pools`
+
+Queues an operator transaction that creates a native PokoinSwap pool.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
+```
+
+Request body:
+
+```json
+{"assetA":"PKN","assetB":"wPKN"}
+```
+
+### `POST /admin/swap/liquidity/add`
+
+Queues an operator transaction that adds reserves to an existing pool.
+
+Authentication:
+
+```text
+Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>
+```
+
+Request body:
+
+```json
+{"poolId":"PKN-WPKN","amountA":1000,"amountB":1000}
+```
+
 ## Website Health Page Integration
 
 For a public site, prefer these calls:
@@ -333,8 +589,9 @@ Do not expose `POKOINPOS_OPERATOR_TOKEN` in frontend code. If your site needs op
 
 The node does not need to mine a new block every slot when there are no transactions. `POKOINPOS_IDLE_SLOT_INTERVAL` controls idle keepalive blocks:
 
-- `30` means mine one idle keepalive block every 30 slots.
+- `300` means mine one idle keepalive block every 300 slots.
 - `0` disables idle backoff and preserves the old behavior.
 - Pending transactions always bypass idle backoff and trigger mining immediately.
+- Pending transaction pressure should still be bounded. The production defaults use `POKOINPOS_MINE_ATTEMPTS_PER_PENDING_TX=1` and `POKOINPOS_MAX_MINE_ATTEMPTS_PER_TICK=5`.
 
 Validator eligibility is based on P2P participation with a valid miner identity. Spendable balance affects mining weight, but does not decide whether a validator can mine. Validators with positive balance share 97% of lottery weight proportionally to balance; all zero-balance validators share the remaining 3% cumulatively. Rewards can be withdrawn automatically each month to a configured payout `0x` wallet.

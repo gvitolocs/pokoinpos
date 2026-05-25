@@ -1,0 +1,58 @@
+services:
+  pokoin-marketplace-postgres:
+    image: postgres:17-alpine
+    container_name: ${MARKETPLACE_DB_CONTAINER_NAME:-pokoin-marketplace-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${MARKETPLACE_DB_NAME:-pokoin_marketplace}
+      POSTGRES_USER: ${MARKETPLACE_DB_USER:-pokoin_marketplace}
+      POSTGRES_PASSWORD: ${MARKETPLACE_DB_PASSWORD:?MARKETPLACE_DB_PASSWORD is required}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/var/lib/postgresql/certs/server.crt
+      - -c
+      - ssl_key_file=/var/lib/postgresql/certs/server.key
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - max_connections=${MARKETPLACE_DB_MAX_CONNECTIONS:-80}
+      - -c
+      - statement_timeout=${MARKETPLACE_DB_STATEMENT_TIMEOUT:-15000}
+      - -c
+      - idle_in_transaction_session_timeout=${MARKETPLACE_DB_IDLE_TX_TIMEOUT:-15000}
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=${MARKETPLACE_DB_MAX_WAL_SENDERS:-10}
+      - -c
+      - max_replication_slots=${MARKETPLACE_DB_MAX_REPLICATION_SLOTS:-10}
+      - -c
+      - wal_keep_size=${MARKETPLACE_DB_WAL_KEEP_SIZE:-2048MB}
+      - -c
+      - hot_standby=on
+      - -c
+      - wal_level=${MARKETPLACE_DB_WAL_LEVEL:-replica}
+      - -c
+      - max_wal_senders=${MARKETPLACE_DB_MAX_WAL_SENDERS:-10}
+      - -c
+      - max_replication_slots=${MARKETPLACE_DB_MAX_REPLICATION_SLOTS:-10}
+      - -c
+      - wal_keep_size=${MARKETPLACE_DB_WAL_KEEP_SIZE:-1024MB}
+      - -c
+      - hot_standby=${MARKETPLACE_DB_HOT_STANDBY:-on}
+    ports:
+      - "${MARKETPLACE_DB_BIND_HOST:-0.0.0.0}:${MARKETPLACE_DB_PORT:-5432}:5432"
+    volumes:
+      - "${MARKETPLACE_DB_DATA_HOST_PATH:-/var/lib/pokoinpos-postgres}:/var/lib/postgresql/data"
+      - "${MARKETPLACE_DB_CERTS_HOST_PATH:-/etc/pokoinpos-postgres/certs}:/var/lib/postgresql/certs:ro"
+      - "${MARKETPLACE_DB_BACKUP_HOST_PATH:-/var/backups/pokoinpos-postgres}:/backups"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+

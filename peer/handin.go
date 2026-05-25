@@ -211,6 +211,7 @@ func runNode(cfg NodeConfig) {
 			cfg.GenesisHardness,
 			cfg.GenesisSeed,
 		)
+		applyRuntimeConsensusConfig(genesis, cfg)
 		for address, amount := range cfg.EVMGenesisAlloc {
 			genesis.InitialBalances[address] = amount
 		}
@@ -218,7 +219,11 @@ func runNode(cfg NodeConfig) {
 	}
 	peer.SetAdvertiseHost(cfg.AdvertiseHost)
 	bootstrapRegistry := NewBootstrapRegistry(cfg.BootstrapManifestURL, cfg.BootstrapRefreshHours, cfg.BootstrapPeers)
-	bootstrapPeers := mergeBootstrapPeers(bootstrapRegistry.Peers(context.Background()), cfg.BootstrapPeers)
+	bootstrapPeers := filterSelfBootstrapPeers(
+		mergeBootstrapPeers(bootstrapRegistry.Peers(context.Background()), cfg.BootstrapPeers),
+		cfg.AdvertiseHost,
+		cfg.ListenPort,
+	)
 	bootstrapRegistry.Start(context.Background())
 	startedFromBootstrap := false
 	if err := peer.Start(); err != nil {
@@ -226,7 +231,7 @@ func runNode(cfg NodeConfig) {
 		os.Exit(1)
 	}
 	go func() {
-		if err := StartOpsServer(cfg.OpsAddr, peer, cfg.AdminToken, cfg.EVMChainID, cfg.EVMNetworkID, bootstrapRegistry); err != nil {
+		if err := StartOpsServer(cfg.OpsAddr, peer, cfg.AdminToken, cfg.EVMChainID, cfg.EVMNetworkID, bootstrapRegistry, cfg.ReservedSupplyAddresses); err != nil {
 			logEvent("ops_server_stopped", map[string]any{"error": err.Error()})
 			os.Exit(1)
 		}
@@ -235,6 +240,11 @@ func runNode(cfg NodeConfig) {
 	for _, bootstrap := range bootstrapPeers {
 		peers, err := peer.ConnectAddress(bootstrap)
 		if err != nil {
+			logEvent("bootstrap_join_failed", map[string]any{
+				"host":  bootstrap.Host,
+				"port":  bootstrap.Port,
+				"error": err.Error(),
+			})
 			continue
 		}
 		peer.joinKnownPeers(peers)
@@ -286,9 +296,18 @@ func runNode(cfg NodeConfig) {
 				continue
 			}
 			manifestPeers := bootstrapRegistry.CachedPeers()
-			for _, bootstrap := range mergeBootstrapPeers(manifestPeers, cfg.BootstrapPeers) {
+			for _, bootstrap := range filterSelfBootstrapPeers(
+				mergeBootstrapPeers(manifestPeers, cfg.BootstrapPeers),
+				cfg.AdvertiseHost,
+				cfg.ListenPort,
+			) {
 				peers, err := peer.ConnectAddress(bootstrap)
 				if err != nil {
+					logEvent("bootstrap_reconnect_failed", map[string]any{
+						"host":  bootstrap.Host,
+						"port":  bootstrap.Port,
+						"error": err.Error(),
+					})
 					continue
 				}
 				peer.joinKnownPeers(peers)
@@ -321,30 +340,38 @@ func runNode(cfg NodeConfig) {
 	}()
 
 	logEvent("node_started", map[string]any{
-		"listenPort":               cfg.ListenPort,
-		"advertiseHost":            cfg.AdvertiseHost,
-		"opsAddr":                  cfg.OpsAddr,
-		"slotSeconds":              cfg.SlotSeconds,
-		"idleSlotInterval":         cfg.IdleSlotInterval,
-		"baseMineAttempts":         cfg.BaseMineAttemptsPerTick,
-		"maxMineAttempts":          cfg.MaxMineAttemptsPerTick,
-		"mineAttemptsPerPendingTx": cfg.MineAttemptsPerPendingTx,
-		"genesisHardness":          cfg.GenesisHardness,
-		"genesisSeed":              cfg.GenesisSeed,
-		"finalityDepth":            cfg.FinalityDepth,
-		"evmChainID":               cfg.EVMChainID,
-		"evmNetworkID":             cfg.EVMNetworkID,
-		"evmAllocCount":            len(cfg.EVMGenesisAlloc),
-		"rewardPayoutConfigured":   cfg.RewardPayoutAddress != "",
-		"joinHost":                 cfg.JoinHost,
-		"joinPort":                 cfg.JoinPort,
-		"bootstrapManifestURL":     cfg.BootstrapManifestURL,
-		"bootstrapPeerCount":       len(bootstrapPeers),
-		"stateDir":                 cfg.StateDir,
+		"listenPort":                cfg.ListenPort,
+		"advertiseHost":             cfg.AdvertiseHost,
+		"opsAddr":                   cfg.OpsAddr,
+		"slotSeconds":               cfg.SlotSeconds,
+		"idleSlotInterval":          cfg.IdleSlotInterval,
+		"baseMineAttempts":          cfg.BaseMineAttemptsPerTick,
+		"maxMineAttempts":           cfg.MaxMineAttemptsPerTick,
+		"mineAttemptsPerPendingTx":  cfg.MineAttemptsPerPendingTx,
+		"genesisHardness":           cfg.GenesisHardness,
+		"dynamicHardnessForkHeight": cfg.DynamicHardnessForkHeight,
+		"dynamicHardnessMin":        cfg.DynamicHardnessMin,
+		"dynamicHardnessMax":        cfg.DynamicHardnessMax,
+		"dynamicHardnessWindow":     cfg.DynamicHardnessWindow,
+		"fastBlockTargetSlots":      cfg.FastBlockTargetSlots,
+		"idleBlockTargetSlots":      cfg.IdleBlockTargetSlots,
+		"genesisSeed":               cfg.GenesisSeed,
+		"finalityDepth":             cfg.FinalityDepth,
+		"evmChainID":                cfg.EVMChainID,
+		"evmNetworkID":              cfg.EVMNetworkID,
+		"evmAllocCount":             len(cfg.EVMGenesisAlloc),
+		"rewardPayoutConfigured":    cfg.RewardPayoutAddress != "",
+		"joinHost":                  cfg.JoinHost,
+		"joinPort":                  cfg.JoinPort,
+		"bootstrapManifestURL":      cfg.BootstrapManifestURL,
+		"bootstrapPeerCount":        len(bootstrapPeers),
+		"stateDir":                  cfg.StateDir,
 	})
 
 	stateTicker := time.NewTicker(time.Duration(cfg.StateSaveIntervalSeconds) * time.Second)
 	defer stateTicker.Stop()
+	syncTicker := time.NewTicker(time.Duration(cfg.ReconnectIntervalSeconds) * time.Second)
+	defer syncTicker.Stop()
 	ticker := time.NewTicker(time.Duration(cfg.SlotSeconds) * time.Second)
 	defer ticker.Stop()
 	for {
@@ -378,6 +405,8 @@ func runNode(cfg NodeConfig) {
 			if err := saveNodeState(cfg.StateDir, cfg.ListenPort, peer, slot, lastPayoutUnix); err != nil {
 				logEvent("node_state_save_failed", map[string]any{"error": err.Error()})
 			}
+		case <-syncTicker.C:
+			peer.RequestChainSyncFromPeers()
 		}
 	}
 }
@@ -406,6 +435,18 @@ func maybeQueueMonthlyPayout(peer *Peer, cfg NodeConfig, lastPayoutUnix *int64) 
 	}
 	*lastPayoutUnix = now
 	return tx, true
+}
+
+func applyRuntimeConsensusConfig(genesis *account.GenesisMetaData, cfg NodeConfig) {
+	if genesis == nil {
+		return
+	}
+	genesis.DynamicHardnessForkHeight = cfg.DynamicHardnessForkHeight
+	genesis.DynamicHardnessMin = cfg.DynamicHardnessMin
+	genesis.DynamicHardnessMax = cfg.DynamicHardnessMax
+	genesis.DynamicHardnessWindow = cfg.DynamicHardnessWindow
+	genesis.FastBlockTargetSlots = cfg.FastBlockTargetSlots
+	genesis.IdleBlockTargetSlots = cfg.IdleBlockTargetSlots
 }
 
 func shouldMineSlot(slot int, mempoolDepth int, cfg NodeConfig) bool {

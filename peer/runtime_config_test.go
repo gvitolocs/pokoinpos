@@ -1,45 +1,49 @@
 package main
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestMineAttemptsForNetworkScalesWithPendingTransactions(t *testing.T) {
 	cfg := NodeConfig{
 		BaseMineAttemptsPerTick:  1,
-		MaxMineAttemptsPerTick:   100,
-		MineAttemptsPerPendingTx: 25,
+		MaxMineAttemptsPerTick:   5,
+		MineAttemptsPerPendingTx: 1,
 	}
 
 	if got := mineAttemptsForNetwork(0, 1, cfg); got != 1 {
 		t.Fatalf("idle attempts: got %d want 1", got)
 	}
-	if got := mineAttemptsForNetwork(2, 1, cfg); got != 51 {
-		t.Fatalf("pending attempts: got %d want 51", got)
+	if got := mineAttemptsForNetwork(2, 1, cfg); got != 3 {
+		t.Fatalf("pending attempts: got %d want 3", got)
 	}
-	if got := mineAttemptsForNetwork(10, 1, cfg); got != 100 {
-		t.Fatalf("capped attempts: got %d want 100", got)
+	if got := mineAttemptsForNetwork(10, 1, cfg); got != 5 {
+		t.Fatalf("capped attempts: got %d want 5", got)
 	}
 }
 
 func TestMineAttemptsForNetworkDividesByAvailableNodes(t *testing.T) {
 	cfg := NodeConfig{
 		BaseMineAttemptsPerTick:  4,
-		MaxMineAttemptsPerTick:   100,
-		MineAttemptsPerPendingTx: 40,
+		MaxMineAttemptsPerTick:   5,
+		MineAttemptsPerPendingTx: 1,
 	}
 
-	if got := mineAttemptsForNetwork(1, 1, cfg); got != 44 {
-		t.Fatalf("single-node attempts: got %d want 44", got)
+	if got := mineAttemptsForNetwork(1, 1, cfg); got != 5 {
+		t.Fatalf("single-node attempts: got %d want 5", got)
 	}
-	if got := mineAttemptsForNetwork(1, 4, cfg); got != 11 {
-		t.Fatalf("four-node attempts: got %d want 11", got)
+	if got := mineAttemptsForNetwork(1, 4, cfg); got != 4 {
+		t.Fatalf("four-node attempts: got %d want 4", got)
 	}
-	if got := mineAttemptsForNetwork(1, 0, cfg); got != 44 {
-		t.Fatalf("zero availability should fall back to one node: got %d want 44", got)
+	if got := mineAttemptsForNetwork(1, 0, cfg); got != 5 {
+		t.Fatalf("zero availability should fall back to one node: got %d want 5", got)
 	}
 }
 
 func TestShouldMineSlotBacksOffWhenIdle(t *testing.T) {
-	cfg := NodeConfig{IdleSlotInterval: 30}
+	cfg := NodeConfig{IdleSlotInterval: 300}
 
 	if !shouldMineSlot(1, 0, cfg) {
 		t.Fatal("first idle slot should mine a keepalive block")
@@ -47,7 +51,7 @@ func TestShouldMineSlotBacksOffWhenIdle(t *testing.T) {
 	if shouldMineSlot(2, 0, cfg) {
 		t.Fatal("idle slot before interval should not mine")
 	}
-	if !shouldMineSlot(30, 0, cfg) {
+	if !shouldMineSlot(300, 0, cfg) {
 		t.Fatal("idle slot at interval should mine")
 	}
 	if !shouldMineSlot(2, 1, cfg) {
@@ -84,5 +88,53 @@ func TestRewardPayoutAddressValidation(t *testing.T) {
 
 	if _, err := LoadNodeConfigFromEnv(); err == nil {
 		t.Fatal("expected invalid payout address to fail")
+	}
+}
+
+func TestLoadNodeConfigUsesManifestDefaults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"schemaVersion": 1,
+			"network": {
+				"bootstrapRefreshIntervalHours": 12
+			},
+			"evm": {
+				"chainId": 26062026,
+				"networkId": "26062026"
+			},
+			"bootstrap": {
+				"fallbackPeers": [
+					"92.5.153.117:43000",
+					"130.162.242.213:43001"
+				],
+				"defaultJoinPeer": {
+					"host": "92.5.153.117",
+					"port": 43000
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("POKOINPOS_BOOTSTRAP_MANIFEST_URL", server.URL)
+	t.Setenv("POKOINPOS_LISTEN_PORT", "43001")
+	t.Setenv("POKOINPOS_ADVERTISE_HOST", "example.duckdns.com")
+
+	cfg, err := LoadNodeConfigFromEnv()
+	if err != nil {
+		t.Fatalf("manifest defaults should produce valid config: %v", err)
+	}
+	if cfg.JoinHost != "92.5.153.117" || cfg.JoinPort != 43000 {
+		t.Fatalf("unexpected join default: %s:%d", cfg.JoinHost, cfg.JoinPort)
+	}
+	if len(cfg.BootstrapPeers) != 2 {
+		t.Fatalf("bootstrap peers: got %d want 2", len(cfg.BootstrapPeers))
+	}
+	if cfg.BootstrapRefreshHours != 12 {
+		t.Fatalf("refresh hours: got %d want 12", cfg.BootstrapRefreshHours)
+	}
+	if cfg.EVMChainID != 26062026 || cfg.EVMNetworkID != "26062026" {
+		t.Fatalf("unexpected evm defaults: %d %s", cfg.EVMChainID, cfg.EVMNetworkID)
 	}
 }

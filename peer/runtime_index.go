@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"peer/account"
 	"sort"
@@ -15,6 +16,10 @@ type ExplorerTx struct {
 	Kind             string `json:"kind,omitempty"`
 	Nonce            uint64 `json:"nonce"`
 	ChainID          int64  `json:"chainId,omitempty"`
+	Raw              string `json:"raw,omitempty"`
+	Signature        string `json:"signature,omitempty"`
+	NFT              any    `json:"nft,omitempty"`
+	AMM              any    `json:"amm,omitempty"`
 	BlockHash        string `json:"blockHash"`
 	BlockNumber      int    `json:"blockNumber"`
 	TransactionIndex int    `json:"transactionIndex"`
@@ -109,6 +114,10 @@ func explorerTxFromSigned(tx account.SignedTransaction, blockHash string, blockN
 		Kind:             tx.Kind,
 		Nonce:            tx.Nonce,
 		ChainID:          tx.ChainID,
+		Raw:              tx.Raw,
+		Signature:        tx.Signature,
+		NFT:              tx.NFT,
+		AMM:              tx.AMM,
 		BlockHash:        blockHash,
 		BlockNumber:      blockNumber,
 		TransactionIndex: txIndex,
@@ -117,14 +126,38 @@ func explorerTxFromSigned(tx account.SignedTransaction, blockHash string, blockN
 }
 
 func signedTransactionFromExplorer(tx ExplorerTx) account.SignedTransaction {
+	var nft *account.NFTPayload
+	if tx.NFT != nil {
+		raw, err := json.Marshal(tx.NFT)
+		if err == nil {
+			var payload account.NFTPayload
+			if err = json.Unmarshal(raw, &payload); err == nil {
+				nft = &payload
+			}
+		}
+	}
+	var amm *account.AMMPayload
+	if tx.AMM != nil {
+		raw, err := json.Marshal(tx.AMM)
+		if err == nil {
+			var payload account.AMMPayload
+			if err = json.Unmarshal(raw, &payload); err == nil {
+				amm = &payload
+			}
+		}
+	}
 	return account.SignedTransaction{
-		ID:      tx.Hash,
-		From:    tx.From,
-		To:      tx.To,
-		Amount:  tx.Amount,
-		Kind:    tx.Kind,
-		Nonce:   tx.Nonce,
-		ChainID: tx.ChainID,
+		ID:        tx.Hash,
+		From:      tx.From,
+		To:        tx.To,
+		Amount:    tx.Amount,
+		Kind:      tx.Kind,
+		Nonce:     tx.Nonce,
+		ChainID:   tx.ChainID,
+		Raw:       tx.Raw,
+		Signature: tx.Signature,
+		NFT:       nft,
+		AMM:       amm,
 	}
 }
 

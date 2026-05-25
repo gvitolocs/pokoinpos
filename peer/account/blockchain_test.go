@@ -96,6 +96,65 @@ func TestAddBlockAppliesTransactionsAndRewards(t *testing.T) {
 	}
 }
 
+func TestNewCandidateBlockUsesSignedLotteryProof(t *testing.T) {
+	miner, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner}, 1_000_000, 1_000_000_000, 42)
+	chain := NewBlockchainWithGenesis(genesis)
+
+	block := NewCandidateBlock(miner, 1, chain.BestLeafHash(), nil, genesis.Seed)
+	if block.LotteryProof == "" {
+		t.Fatal("expected lottery proof")
+	}
+	if !VerifyLotteryProof(genesis.Seed, block.Slot, block.VerificationKey, block.LotteryProof) {
+		t.Fatal("expected lottery proof to verify")
+	}
+	proofDraw, ok := ComputeLotteryDrawFromProof(block.LotteryProof)
+	if !ok {
+		t.Fatal("expected proof-derived draw")
+	}
+	if block.Draw != proofDraw {
+		t.Fatalf("block draw got %d want proof draw %d", block.Draw, proofDraw)
+	}
+	if block.Draw == ComputeLotteryDraw(genesis.Seed, block.Slot, block.VerificationKey) {
+		t.Fatal("new block should not use publicly predictable legacy draw")
+	}
+	if ok := chain.AddBlock(block); !ok {
+		t.Fatal("expected proof-backed block to be valid")
+	}
+}
+
+func TestAddBlockRejectsTamperedLotteryProof(t *testing.T) {
+	miner, _ := NewAccount()
+	other, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner, other}, 1_000_000, 1_000_000_000, 42)
+	chain := NewBlockchainWithGenesis(genesis)
+
+	block := NewCandidateBlock(miner, 1, chain.BestLeafHash(), nil, genesis.Seed)
+	block.LotteryProof = SignLotteryProof(genesis.Seed, block.Slot, other)
+	block.Draw, _ = ComputeLotteryDrawFromProof(block.LotteryProof)
+	block.Signature = block.Sign(miner)
+
+	if ok := chain.AddBlock(block); ok {
+		t.Fatal("expected block with proof from another key to be rejected")
+	}
+}
+
+func TestAddBlockAcceptsLegacyNoProofLotteryDraw(t *testing.T) {
+	miner, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner}, 1_000_000, 1_000_000_000, 42)
+	chain := NewBlockchainWithGenesis(genesis)
+	parent := chain.BestLeafHash()
+	draw := ComputeLotteryDraw(genesis.Seed, 1, miner.SafeEncode())
+	block := NewBlock(miner, 1, draw, parent, EncodeBlockTransactions(nil))
+
+	if block.LotteryProof != "" {
+		t.Fatal("legacy block should not carry lottery proof")
+	}
+	if ok := chain.AddBlock(block); !ok {
+		t.Fatal("expected legacy no-proof block to remain valid")
+	}
+}
+
 func TestAddBlockRejectsInvalidTransaction(t *testing.T) {
 	miner, _ := NewAccount()
 	from, _ := NewAccount()
@@ -216,5 +275,67 @@ func TestLotteryTicketsSharesZeroValidatorPool(t *testing.T) {
 
 	if gotA, gotB := ledger.LotteryTickets(zeroA.SafeEncode()), ledger.LotteryTickets(zeroB.SafeEncode()); gotA != gotB {
 		t.Fatalf("zero-validator tickets should split evenly: %d vs %d", gotA, gotB)
+	}
+}
+
+func TestEffectiveHardnessUsesStaticBeforeFork(t *testing.T) {
+	miner, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner}, 1_000_000, 10_000, 42)
+	genesis.DynamicHardnessForkHeight = 100
+	chain := NewBlockchainWithGenesis(genesis)
+
+	if got := EffectiveHardnessForMining(chain.CanonicalBlocks(0), genesis, 0); got != 10_000 {
+		t.Fatalf("pre-fork hardness got %d want 10000", got)
+	}
+}
+
+func TestEffectiveHardnessAdjustsAfterFork(t *testing.T) {
+	miner, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner}, 1_000_000, 10_000, 42)
+	genesis.DynamicHardnessForkHeight = 1
+	genesis.DynamicHardnessMin = 100
+	genesis.DynamicHardnessMax = 1_000_000
+	genesis.DynamicHardnessWindow = 4
+	genesis.FastBlockTargetSlots = 2
+	genesis.IdleBlockTargetSlots = 20
+	chain := NewBlockchainWithGenesis(genesis)
+
+	parent := chain.BestLeafHash()
+	for slot := 20; slot <= 80; slot += 20 {
+		block := NewCandidateBlock(miner, slot, parent, nil, genesis.Seed)
+		chain.Blocks = append(chain.Blocks, *block)
+		hash := block.GetBlockHash()
+		parent = encode(hash[:])
+	}
+
+	idle := EffectiveHardnessForMining(chain.CanonicalBlocks(0), genesis, 0)
+	fast := EffectiveHardnessForMining(chain.CanonicalBlocks(0), genesis, 1)
+	if idle != 10_000 {
+		t.Fatalf("idle target should preserve base hardness at 20-slot cadence: got %d", idle)
+	}
+	if fast <= idle {
+		t.Fatalf("pending tx target should raise hardness for faster blocks: fast=%d idle=%d", fast, idle)
+	}
+}
+
+func TestEffectiveHardnessClamps(t *testing.T) {
+	miner, _ := NewAccount()
+	genesis := MakeGenesisMetaDataFromAccounts([]*Account{miner}, 1_000_000, 10_000, 42)
+	genesis.DynamicHardnessForkHeight = 1
+	genesis.DynamicHardnessMin = 5_000
+	genesis.DynamicHardnessMax = 20_000
+	genesis.DynamicHardnessWindow = 2
+	genesis.FastBlockTargetSlots = 2
+	genesis.IdleBlockTargetSlots = 20
+	chain := NewBlockchainWithGenesis(genesis)
+	parent := chain.BestLeafHash()
+	block := NewCandidateBlock(miner, 1, parent, nil, genesis.Seed)
+	chain.Blocks = append(chain.Blocks, *block)
+
+	if got := EffectiveHardnessForMining(chain.CanonicalBlocks(0), genesis, 0); got != 5_000 {
+		t.Fatalf("expected min clamp, got %d", got)
+	}
+	if got := EffectiveHardnessForMining(chain.CanonicalBlocks(0), genesis, 1); got != 5_000 {
+		t.Fatalf("expected min clamp for fast target, got %d", got)
 	}
 }

@@ -1,0 +1,70 @@
+TODO tomorrow
+
+Vercel
+- Wait for the Vercel Hobby daily deploy limit to reset.
+- Deploy the web app using the correct script, not `vercel deploy` from the project root:
+  /Users/giuseppe/cardvault/pokemon_card_vault/deploy-pokoin-web.sh
+- Verify after deploy:
+  https://pokoin.com/
+  https://pokoin.com/health
+  https://pokoin.com/bootstrap-peers.json
+
+Node versions
+- Peer Docker image was rebuilt and pushed:
+  newisdom/pokoinpos-peer:latest
+  digest sha256:25786786841ca3b3661e9d172e72e734487701b0cf8649a9e49daa6435dea222
+- All 4 Oracle peers were rolled and verified locally.
+- Live RPC already returns:
+  version: PokoinPoS/v0.2.0
+- Verified endpoints:
+  https://rpc.pokoin.com/health
+  https://rpc.pokoin.com/chain/status
+  web3_clientVersion
+- The remaining `Version unknown` on pokoin.com/health is from the old static manifest, not from the nodes.
+- Updated manifests are ready locally:
+  deploy/bootstrap/bootstrap-peers.json
+  /Users/giuseppe/cardvault/pokemon_card_vault/web/bootstrap-peers.json
+
+Important deploy warning
+- Do not deploy the web project from /Users/giuseppe/cardvault/pokemon_card_vault with plain `vercel deploy`.
+- That publishes an incomplete output and makes pokoin.com return 404.
+- Always use:
+  ./deploy-pokoin-web.sh
+
+Cloudflare R2 profile pictures
+- Created R2 bucket:
+  pokoin-profile-pictures
+- Public URL:
+  https://pub-cefbe784076b42bcbb6d3b7c4f53b22c.r2.dev
+- Smoke test passed: remote upload, public read, delete.
+- Backend code is ready with fallback to inline base64 if R2 keys are missing.
+- Vercel production env already has:
+  CLOUDFLARE_ACCOUNT_ID
+  R2_PROFILE_PICTURES_BUCKET
+  R2_PROFILE_PICTURES_PUBLIC_URL
+- Still need to generate and add:
+  R2_ACCESS_KEY_ID
+  R2_SECRET_ACCESS_KEY
+
+Wallet/account rules
+- Firebase wallet registry was cleaned.
+- vitologiuseppe17@gmail.com now has only one linked wallet:
+  0xf50f537f7ae5df119c0c36d127a4de4af1d136a9
+- Removed extra registry links:
+  0x8b67bcdb039a0a068b49c6d274147e17affdb938
+  0xb4029f68e360280aa4ad21d8ae5ad8896b8768b2
+- Code is ready locally so Google/email accounts cannot auto-link multiple wallets.
+
+Pokoin status project
+- Created Vercel project:
+  pokoin-status
+- Live:
+  https://pokoin-status.vercel.app/api/total-supply
+  https://pokoin-status.vercel.app/api/circulating-supply
+- Web project routes were updated locally to proxy supply APIs there.
+
+Before tomorrow's deploy
+- Re-run quick checks:
+  cd /Users/giuseppe/pokoinpos/peer && go test ./... && go vet ./...
+  cd /Users/giuseppe/cardvault/pokemon_card_vault && node --check api/wallet-link.js
+  cd /Users/giuseppe/cardvault/pokemon_card_vault && /Users/giuseppe/flutter/bin/flutter analyze lib/screens/profile_screen.dart lib/services/auth_service.dart

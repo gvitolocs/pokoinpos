@@ -6,6 +6,7 @@ It started as an ADNO static PoS exercise and has been extended into a productio
 ## Current Network Surface
 
 - Public website and wallet: `https://pokoin.com`
+- Marketplace home/catalog: `https://pokoin.com/marketplace`
 - Wallet route: `https://pokoin.com/wallet`
 - Public scan/explorer UI: `https://pokoin.com/scan`
 - Explorer/static metadata host: `https://explorer.pokoin.com`
@@ -15,7 +16,11 @@ It started as an ADNO static PoS exercise and has been extended into a productio
 - Chain ID: `26062026` (`0x18dacca`)
 - Native currency: `PKN`
 
-The CardVault website and Pokoin Wallet now live in a single Flutter web app in the separate `cardvault` repository. This repository remains the source of truth for the chain, node runtime, RPC behavior, deployment scripts, and blockchain documentation.
+The CardVault website and Pokoin Wallet now live in a single Flutter web app in
+the separate `cardvault` repository. This repository remains the source of truth
+for the chain, node runtime, RPC behavior, deployment scripts, and blockchain
+documentation. See `docs/website.md` for the website route map, marketplace API
+surface, data ownership, and deployment boundaries.
 
 ## Hosting Architecture
 
@@ -24,7 +29,8 @@ Pokoin separates public web surfaces from node runtime services:
 - **Vercel hosts web/static surfaces**: `pokoin.com`, `pokoin.com/scan`,
   `pokoin.com/health`, `pokoin.com/wallet`, `explorer.pokoin.com`,
   `/wpkn/logo.png`, `/wpkn-reserve.json`, banners, favicons, and token metadata
-  assets.
+  assets. `pokoin.com` also serves the marketplace API functions under
+  `/api/marketplace-*`.
 - **Oracle/Docker nodes host chain services**: P2P, node-local ops APIs, and the
   public RPC gateway exposed at `rpc.pokoin.com`.
 - **Cloudflare DNS points frontend hostnames to Vercel**. `explorer.pokoin.com`
@@ -175,10 +181,12 @@ docker compose --env-file deploy/env/peer2.env -f docker-compose.peer.yml up -d 
 This command builds the image and starts a peer that joins an existing node using:
 
 - `POKOINPOS_BOOTSTRAP_MANIFEST_URL`
-- `POKOINPOS_BOOTSTRAP_PEERS`
-- `POKOINPOS_JOIN_HOST`
-- `POKOINPOS_JOIN_PORT`
 - `POKOINPOS_ADVERTISE_HOST`
+
+The public bootstrap manifest supplies the default join peer, fallback peers,
+refresh interval, EVM chain ID, and EVM network ID. Keep local env values for
+node identity, public advertise host, ports, state path, and optional operator
+token unless you intentionally need a local override.
 
 The container now includes:
 
@@ -189,21 +197,14 @@ The container now includes:
 Set `POKOINPOS_ADVERTISE_HOST` to the public IP or DNS name other peers can reach
 on `POKOINPOS_LISTEN_PORT`; do not leave it as `127.0.0.1` for public peers.
 
-Set multiple stable seed nodes with `POKOINPOS_BOOTSTRAP_PEERS`, for example:
-
-```env
-POKOINPOS_BOOTSTRAP_PEERS=92.5.153.117:43000,130.162.242.213:43001
-```
-
-New nodes try every bootstrap peer and then continue with discovered peers, so the
-network can still be found if one Oracle seed is offline.
-
-By default, public nodes now fetch the dynamic bootstrap manifest first:
+By default, public nodes fetch the dynamic bootstrap manifest:
 
 ```env
 POKOINPOS_BOOTSTRAP_MANIFEST_URL=https://pokoin.com/bootstrap-peers.json
-POKOINPOS_BOOTSTRAP_REFRESH_INTERVAL_HOURS=24
 ```
+
+New nodes try every manifest bootstrap peer and then continue with discovered
+peers, so the network can still be found if one Oracle seed is offline.
 
 Bootstrap promotion is intentionally slow. New public nodes first spend 14 days
 in vetting and must stay online for at least `95%` of that vetting window. After

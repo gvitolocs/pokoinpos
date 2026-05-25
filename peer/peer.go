@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -74,10 +75,30 @@ type MessageHistory struct {
 }
 
 type connectPayload struct {
-	Peers     []string      `json:"peers"`
-	Addresses []PeerAddress `json:"addresses,omitempty"`
-	Address   string        `json:"address,omitempty"`
-	Validator string        `json:"validator,omitempty"`
+	Peers       []string      `json:"peers"`
+	Addresses   []PeerAddress `json:"addresses,omitempty"`
+	Address     string        `json:"address,omitempty"`
+	Validator   string        `json:"validator,omitempty"`
+	GenesisHash string        `json:"genesisHash,omitempty"`
+	Height      int           `json:"height,omitempty"`
+	BestHash    string        `json:"bestHash,omitempty"`
+}
+
+type chainSyncRequest struct {
+	GenesisHash string `json:"genesisHash"`
+	FromHeight  int    `json:"fromHeight"`
+}
+
+type chainSyncResponse struct {
+	GenesisHash string          `json:"genesisHash"`
+	Height      int             `json:"height"`
+	Blocks      []account.Block `json:"blocks"`
+}
+
+type chainStatusSummary struct {
+	GenesisHash string
+	Height      int
+	BestHash    string
 }
 
 type PeerAddress struct {
@@ -120,9 +141,43 @@ func (p *Peer) SetAdvertiseHost(host string) {
 		return
 	}
 	p.lock.Lock()
+	oldID := p.id
+	newID := peerID(host, p.listenport)
+	if newID != oldID {
+		p.rekeyLocked(oldID, newID)
+	}
 	p.advertiseHost = host
 	p.peerAddresses[p.id] = PeerAddress{ID: p.id, Host: host, Port: p.listenport}
 	p.lock.Unlock()
+}
+
+func peerID(host string, port int) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return strconv.Itoa(port)
+	}
+	sum := sha256.Sum256([]byte(net.JoinHostPort(host, strconv.Itoa(port))))
+	return "peer-" + base64.RawURLEncoding.EncodeToString(sum[:16])
+}
+
+func (p *Peer) rekeyLocked(oldID string, newID string) {
+	if oldID == "" || newID == "" || oldID == newID {
+		return
+	}
+	p.id = newID
+	if conn, exists := p.conns[oldID]; exists {
+		delete(p.conns, oldID)
+		p.conns[newID] = conn
+	}
+	if validator, exists := p.peerValidators[oldID]; exists {
+		delete(p.peerValidators, oldID)
+		p.peerValidators[newID] = validator
+	}
+	if address, exists := p.peerAddresses[oldID]; exists {
+		delete(p.peerAddresses, oldID)
+		address.ID = newID
+		p.peerAddresses[newID] = address
+	}
 }
 
 // ConfigurePoS initializes blockchain state for Exercise 16.2.
@@ -215,6 +270,7 @@ func (p *Peer) prepareConnection(conn net.Conn, fromAccept bool) ([]PeerAddress,
 	p.recordPeerAddress(addressFromConnectPayload(msg.From, msg.Payload, conn.RemoteAddr()))
 	p.recordPeerValidator(msg.From, validatorFromConnectPayload(msg.Payload))
 	go p.handleDecode(msg.From, conn, reader)
+	p.maybeRequestChainSync(msg.From, msg.Payload)
 	// Catch-up: when we are the server (we accepted), send the new peer all messages we already have
 	// so they get the same ledger and message history as the rest of the network.
 	if fromAccept {
@@ -276,6 +332,14 @@ func (p *Peer) OnMessage(from string, msg *Message) {
 		if !p.handleBlock(msg) {
 			return
 		}
+	case helpers.CHAIN_SYNC_REQUEST_MESSAGE_TYPE:
+		p.handleChainSyncRequest(from, msg)
+		return
+	case helpers.CHAIN_SYNC_RESPONSE_MESSAGE_TYPE:
+		if !p.handleChainSyncResponse(msg) {
+			return
+		}
+		return
 	case helpers.JOIN_MESSAGE_TYPE:
 		// Another peer joined the network; if we don't know them yet, connect so we stay fully connected.
 		p.handleJoin(msg)
@@ -358,15 +422,17 @@ func (p *Peer) ConnectAddress(address PeerAddress) ([]PeerAddress, error) {
 	if address.Host == "" || address.Port <= 0 {
 		return nil, fmt.Errorf("invalid peer address %s:%d", address.Host, address.Port)
 	}
-	conn, err := net.Dial(helpers.PROTOCOL, net.JoinHostPort(address.Host, strconv.Itoa(address.Port)))
+	conn, err := net.DialTimeout(helpers.PROTOCOL, net.JoinHostPort(address.Host, strconv.Itoa(address.Port)), 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	// We are the client (joiner), so fromAccept is false (no catch-up from our side).
 	peers, err := p.prepareConnection(conn, false)
 	if err != nil {
 		return nil, err
 	}
+	_ = conn.SetDeadline(time.Time{})
 	return peers, nil
 }
 
@@ -417,6 +483,336 @@ func (p *Peer) sendCatchUp(conn net.Conn) {
 			_ = p.writeMessage(conn, hist.content)
 		}
 	}
+}
+
+func (p *Peer) maybeRequestChainSync(peerID string, raw []byte) {
+	var payload connectPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return
+	}
+	local := p.chainStatus()
+	if payload.GenesisHash == "" || local.GenesisHash == "" {
+		return
+	}
+	if payload.GenesisHash != local.GenesisHash && !p.canAdoptRemoteGenesis() {
+		logEvent("chain_sync_genesis_mismatch", map[string]any{
+			"severity":      "critical",
+			"peerID":        peerID,
+			"localGenesis":  local.GenesisHash,
+			"remoteGenesis": payload.GenesisHash,
+			"localHeight":   local.Height,
+			"remoteHeight":  payload.Height,
+		})
+		return
+	}
+	if payload.Height <= local.Height {
+		return
+	}
+	fromHeight := local.Height + 1
+	if payload.GenesisHash != local.GenesisHash && p.canAdoptRemoteGenesis() {
+		fromHeight = 0
+	}
+	req := chainSyncRequest{
+		GenesisHash: payload.GenesisHash,
+		FromHeight:  fromHeight,
+	}
+	p.logf("chain sync requesting from %s: localHeight=%d remoteHeight=%d fromHeight=%d", peerID, local.Height, payload.Height, fromHeight)
+	p.requestChainSync(peerID, req)
+}
+
+func (p *Peer) requestChainSync(peerID string, req chainSyncRequest) {
+	body, _ := json.Marshal(req)
+	_ = p.Send(peerID, &Message{
+		Type:    helpers.CHAIN_SYNC_REQUEST_MESSAGE_TYPE,
+		MsgID:   fmt.Sprintf("sync-req-%s-%d", p.id, time.Now().UnixNano()),
+		From:    p.id,
+		Payload: body,
+	})
+}
+
+func (p *Peer) RequestChainSyncFromPeers() {
+	local := p.chainStatus()
+	if local.GenesisHash == "" {
+		return
+	}
+	for peerID, conn := range p.connectionSnapshot() {
+		if peerID == p.id || conn == nil {
+			continue
+		}
+		p.requestChainSync(peerID, chainSyncRequest{
+			GenesisHash: local.GenesisHash,
+			FromHeight:  local.Height + 1,
+		})
+	}
+}
+
+func (p *Peer) handleChainSyncRequest(from string, msg *Message) {
+	if p.blockchain == nil {
+		return
+	}
+	var req chainSyncRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return
+	}
+	local := p.chainStatus()
+	if req.GenesisHash == "" || req.GenesisHash != local.GenesisHash {
+		logEvent("chain_sync_request_genesis_mismatch", map[string]any{
+			"severity":         "critical",
+			"peerID":           from,
+			"localGenesis":     local.GenesisHash,
+			"requestedGenesis": req.GenesisHash,
+			"localHeight":      local.Height,
+		})
+		return
+	}
+	blocks := p.blockchain.CanonicalBlocks(0)
+	if req.FromHeight < 0 {
+		req.FromHeight = 0
+	}
+	if req.FromHeight > len(blocks) {
+		req.FromHeight = len(blocks)
+	}
+	p.logf("chain sync serving %d blocks to %s fromHeight=%d height=%d", len(blocks[req.FromHeight:]), from, req.FromHeight, local.Height)
+	resp := chainSyncResponse{
+		GenesisHash: local.GenesisHash,
+		Height:      local.Height,
+		Blocks:      blocks[req.FromHeight:],
+	}
+	body, _ := json.Marshal(resp)
+	_ = p.Send(from, &Message{
+		Type:    helpers.CHAIN_SYNC_RESPONSE_MESSAGE_TYPE,
+		MsgID:   fmt.Sprintf("sync-resp-%s-%d", p.id, time.Now().UnixNano()),
+		From:    p.id,
+		Payload: body,
+	})
+}
+
+func (p *Peer) handleChainSyncResponse(msg *Message) bool {
+	if p.blockchain == nil {
+		return false
+	}
+	var resp chainSyncResponse
+	if err := json.Unmarshal(msg.Payload, &resp); err != nil {
+		return false
+	}
+	local := p.chainStatus()
+	if resp.GenesisHash == "" {
+		return false
+	}
+	if resp.GenesisHash != local.GenesisHash && !p.canAdoptRemoteGenesis() {
+		logEvent("chain_sync_response_genesis_mismatch", map[string]any{
+			"severity":      "critical",
+			"peerID":        msg.From,
+			"localGenesis":  local.GenesisHash,
+			"remoteGenesis": resp.GenesisHash,
+			"localHeight":   local.Height,
+			"remoteHeight":  resp.Height,
+		})
+		return false
+	}
+	if resp.Height <= local.Height || len(resp.Blocks) == 0 {
+		return false
+	}
+	p.logf("chain sync received %d blocks from %s remoteHeight=%d localHeight=%d", len(resp.Blocks), msg.From, resp.Height, local.Height)
+	if resp.GenesisHash != local.GenesisHash {
+		if len(resp.Blocks) != resp.Height+1 {
+			logEvent("chain_sync_full_response_invalid", map[string]any{
+				"severity":     "critical",
+				"peerID":       msg.From,
+				"remoteHeight": resp.Height,
+				"blockCount":   len(resp.Blocks),
+			})
+			return false
+		}
+		if !p.adoptRemoteChain(resp.Blocks) {
+			return false
+		}
+		p.logf("chain sync adopted remote genesis from %s: height %d", msg.From, p.ChainHeight())
+		return true
+	}
+	if len(resp.Blocks) == resp.Height+1 {
+		if !p.installFullSyncedChainFromCommonAncestor(msg.From, resp.Blocks) {
+			return false
+		}
+		p.logf("chain sync switched to longer branch from %s: height %d -> %d", msg.From, local.Height, p.ChainHeight())
+		return true
+	}
+	if resp.Height != local.Height+len(resp.Blocks) {
+		if p.installSyncedOverlap(msg.From, resp.Blocks) {
+			p.logf("chain sync applied overlapping suffix from %s: height %d -> %d", msg.From, local.Height, p.ChainHeight())
+			return true
+		}
+		logEvent("chain_sync_suffix_height_mismatch", map[string]any{
+			"severity":     "critical",
+			"peerID":       msg.From,
+			"localHeight":  local.Height,
+			"remoteHeight": resp.Height,
+			"blockCount":   len(resp.Blocks),
+		})
+		return false
+	}
+	if !p.installSyncedSuffix(msg.From, resp.GenesisHash, resp.Blocks) {
+		return false
+	}
+	p.logf("chain sync applied from %s: height %d -> %d", msg.From, local.Height, p.ChainHeight())
+	return true
+}
+
+func (p *Peer) canAdoptRemoteGenesis() bool {
+	return p.blockchain != nil && p.ChainHeight() == 0 && p.TxHistoryCount() == 0 && p.AcceptedBlocks() == 0
+}
+
+func (p *Peer) adoptRemoteChain(blocks []account.Block) bool {
+	if len(blocks) == 0 || p.blockchain == nil {
+		return false
+	}
+	if blocks[0].ParentHash != account.NO_PARENT_HASH {
+		logEvent("chain_sync_adopt_invalid_genesis_parent", map[string]any{
+			"severity": "critical",
+			"parent":   blocks[0].ParentHash,
+		})
+		return false
+	}
+	for i := 1; i < len(blocks); i++ {
+		if blocks[i].ParentHash != blockHashString(blocks[i-1]) {
+			logEvent("chain_sync_adopt_non_contiguous", map[string]any{
+				"severity": "critical",
+				"index":    i,
+			})
+			return false
+		}
+	}
+	genesis, err := account.DecodeGenesisFromBlock(blocks[0])
+	if err != nil {
+		return false
+	}
+	p.genesis = genesis
+	p.blockchain.ReplaceBlocks(blocks)
+	p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
+	return true
+}
+
+func (p *Peer) installSyncedSuffix(peerID string, genesisHash string, blocks []account.Block) bool {
+	localBlocks := p.blockchain.CanonicalBlocks(0)
+	if len(localBlocks) == 0 || len(blocks) == 0 {
+		return false
+	}
+	expectedParent := blockHashString(localBlocks[len(localBlocks)-1])
+	if blocks[0].ParentHash != expectedParent {
+		logEvent("chain_sync_suffix_parent_mismatch", map[string]any{
+			"severity":       "critical",
+			"peerID":         peerID,
+			"firstParent":    blocks[0].ParentHash,
+			"expectedParent": expectedParent,
+			"localHeight":    len(localBlocks) - 1,
+		})
+		p.requestChainSync(peerID, chainSyncRequest{GenesisHash: genesisHash, FromHeight: 0})
+		return false
+	}
+	merged := append([]account.Block{}, localBlocks...)
+	for i, block := range blocks {
+		if i > 0 && block.ParentHash != blockHashString(blocks[i-1]) {
+			logEvent("chain_sync_suffix_non_contiguous", map[string]any{
+				"severity": "critical",
+				"index":    i,
+			})
+			return false
+		}
+		merged = append(merged, block)
+	}
+	p.blockchain.ReplaceBlocks(merged)
+	p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
+	return true
+}
+
+func (p *Peer) installSyncedOverlap(peerID string, blocks []account.Block) bool {
+	localBlocks := p.blockchain.CanonicalBlocks(0)
+	if len(localBlocks) == 0 || len(blocks) == 0 {
+		return false
+	}
+	localHashes := make(map[string]int, len(localBlocks))
+	for i, block := range localBlocks {
+		localHashes[blockHashString(block)] = i
+	}
+	commonLocalIndex := -1
+	commonRemoteIndex := -1
+	for i, block := range blocks {
+		if i > 0 && block.ParentHash != blockHashString(blocks[i-1]) {
+			logEvent("chain_sync_overlap_non_contiguous", map[string]any{
+				"severity": "critical",
+				"peerID":   peerID,
+				"index":    i,
+			})
+			return false
+		}
+		if localIndex, ok := localHashes[blockHashString(block)]; ok {
+			commonLocalIndex = localIndex
+			commonRemoteIndex = i
+		}
+	}
+	if commonRemoteIndex < 0 || commonRemoteIndex+1 >= len(blocks) {
+		return false
+	}
+	if len(localBlocks[:commonLocalIndex+1])+len(blocks[commonRemoteIndex+1:]) <= len(localBlocks) {
+		return false
+	}
+	replacement := append([]account.Block{}, localBlocks[:commonLocalIndex+1]...)
+	replacement = append(replacement, blocks[commonRemoteIndex+1:]...)
+	p.blockchain.ReplaceBlocks(replacement)
+	p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
+	return true
+}
+
+func (p *Peer) installFullSyncedChainFromCommonAncestor(peerID string, blocks []account.Block) bool {
+	localBlocks := p.blockchain.CanonicalBlocks(0)
+	if len(localBlocks) == 0 || len(blocks) <= len(localBlocks) {
+		return false
+	}
+	localHashes := make(map[string]int, len(localBlocks))
+	for i, block := range localBlocks {
+		localHashes[blockHashString(block)] = i
+	}
+	if genesisContentHash(blocks[0]) != genesisContentHash(localBlocks[0]) {
+		logEvent("chain_sync_full_replacement_refused", map[string]any{
+			"severity": "critical",
+			"peerID":   peerID,
+			"reason":   "genesis_content_mismatch",
+		})
+		return false
+	}
+	commonRemoteIndex := -1
+	commonLocalIndex := -1
+	for i, block := range blocks {
+		if localIndex, ok := localHashes[blockHashString(block)]; ok {
+			commonRemoteIndex = i
+			commonLocalIndex = localIndex
+		}
+	}
+	if commonRemoteIndex <= 0 || commonLocalIndex <= 0 {
+		logEvent("chain_sync_full_replacement_refused", map[string]any{
+			"severity":     "critical",
+			"peerID":       peerID,
+			"localHeight":  len(localBlocks) - 1,
+			"remoteHeight": len(blocks) - 1,
+			"reason":       "no_non_genesis_common_ancestor",
+		})
+		return false
+	}
+	for i := 1; i < len(blocks); i++ {
+		if blocks[i].ParentHash != blockHashString(blocks[i-1]) {
+			logEvent("chain_sync_full_non_contiguous", map[string]any{
+				"severity": "critical",
+				"peerID":   peerID,
+				"index":    i,
+			})
+			return false
+		}
+	}
+	replacement := append([]account.Block{}, localBlocks[:commonLocalIndex+1]...)
+	replacement = append(replacement, blocks[commonRemoteIndex+1:]...)
+	p.blockchain.ReplaceBlocks(replacement)
+	p.ledger = account.LedgerFromBlockchain(p.blockchain, p.finalityDepth)
+	return true
 }
 
 // handleJoin adds the new peer from a Join message to our peer set and connects if we didn't know them.
@@ -539,6 +935,66 @@ func (p *Peer) FloodValidatorWithdrawTransaction(id string, to string, amount in
 	return tx, true
 }
 
+func (p *Peer) FloodNFTMintTransaction(id string, collectionID string, tokenID string, owner string, metadataURI string, metadataHash string, imageURI string) (*account.SignedTransaction, bool) {
+	if p.miner == nil || strings.TrimSpace(collectionID) == "" || strings.TrimSpace(tokenID) == "" || strings.TrimSpace(owner) == "" {
+		return nil, false
+	}
+	tx := account.NewNFTMintTransaction(id, p.miner, collectionID, tokenID, owner, metadataURI, metadataHash, imageURI)
+	if tx.NFT == nil || tx.NFT.CollectionID == "" || tx.NFT.TokenID == "" {
+		return nil, false
+	}
+	p.FloodPoSTransaction(tx)
+	return tx, true
+}
+
+func (p *Peer) FloodNFTTransferTransaction(id string, collectionID string, tokenID string, to string) (*account.SignedTransaction, bool) {
+	if p.miner == nil || strings.TrimSpace(collectionID) == "" || strings.TrimSpace(tokenID) == "" || strings.TrimSpace(to) == "" {
+		return nil, false
+	}
+	tx := account.NewNFTTransferTransaction(id, p.miner, collectionID, tokenID, to)
+	if tx.NFT == nil || tx.NFT.CollectionID == "" || tx.NFT.TokenID == "" {
+		return nil, false
+	}
+	p.FloodPoSTransaction(tx)
+	return tx, true
+}
+
+func (p *Peer) FloodAssetCreditTransaction(id string, asset string, to string, amount int) (*account.SignedTransaction, bool) {
+	if p.miner == nil || strings.TrimSpace(asset) == "" || strings.TrimSpace(to) == "" || amount < 1 {
+		return nil, false
+	}
+	tx := account.NewAssetCreditTransaction(id, p.miner, asset, to, amount)
+	p.FloodPoSTransaction(tx)
+	return tx, true
+}
+
+func (p *Peer) FloodAssetDebitTransaction(id string, asset string, accountName string, amount int) (*account.SignedTransaction, bool) {
+	if p.miner == nil || strings.TrimSpace(asset) == "" || strings.TrimSpace(accountName) == "" || amount < 1 {
+		return nil, false
+	}
+	tx := account.NewAssetDebitTransaction(id, p.miner, asset, accountName, amount)
+	p.FloodPoSTransaction(tx)
+	return tx, true
+}
+
+func (p *Peer) FloodAMMCreatePoolTransaction(id string, assetA string, assetB string) (*account.SignedTransaction, bool) {
+	if p.miner == nil || account.PoolID(assetA, assetB) == "" {
+		return nil, false
+	}
+	tx := account.NewAMMCreatePoolTransaction(id, p.miner, assetA, assetB)
+	p.FloodPoSTransaction(tx)
+	return tx, true
+}
+
+func (p *Peer) FloodAMMAddLiquidityTransaction(id string, poolID string, amountA int, amountB int) (*account.SignedTransaction, bool) {
+	if p.miner == nil || strings.TrimSpace(poolID) == "" || amountA < 1 || amountB < 1 {
+		return nil, false
+	}
+	tx := account.NewAMMAddLiquidityTransaction(id, p.miner, poolID, amountA, amountB)
+	p.FloodPoSTransaction(tx)
+	return tx, true
+}
+
 // MineOneSlot tries to produce and flood one block for the given slot.
 // Returns the mined block when successful.
 func (p *Peer) MineOneSlot(slot int) *account.Block {
@@ -546,23 +1002,29 @@ func (p *Peer) MineOneSlot(slot int) *account.Block {
 		return nil
 	}
 	p.lotteryAttempts.Add(1)
-	accountName := p.miner.SafeEncode()
-	draw := account.ComputeLotteryDraw(p.genesis.Seed, slot, accountName)
-	tickets := account.LedgerFromBlockchain(p.blockchain, 0).LotteryTickets(accountName)
+	proof := account.SignLotteryProof(p.genesis.Seed, slot, p.miner)
+	draw, ok := account.ComputeLotteryDrawFromProof(proof)
+	if !ok {
+		p.lotteryMisses.Add(1)
+		return nil
+	}
+	tickets := p.ValidatorStake()
 	if tickets <= 0 {
 		p.lotteryNoTicket.Add(1)
 		return nil
 	}
-	if !account.WinsLottery(tickets, p.genesis.Hardness, draw) {
+	if !account.WinsLottery(tickets, p.optimisticLotteryHardness(), draw) {
 		p.lotteryMisses.Add(1)
 		return nil
 	}
-	p.lotteryWins.Add(1)
 
+	parentBlocks := p.blockchain.CanonicalBlocks(0)
+	parentLedger := account.LedgerFromBlockchain(p.blockchain, 0)
 	parentHash := p.blockchain.BestLeafHash()
 	// Build a block from txs that are valid on top of current best chain state.
 	// This prevents one invalid tx from making the whole candidate block invalid.
-	tempLedger := account.LedgerFromBlockchain(p.blockchain, 0)
+	tempLedger := parentLedger
+	p.pruneInvalidMempool("pre_mine")
 	p.mempoolLock.Lock()
 	selected := make([]account.SignedTransaction, 0, account.BLOCK_SIZE)
 	for _, tx := range p.mempool {
@@ -574,6 +1036,14 @@ func (p *Peer) MineOneSlot(slot int) *account.Block {
 		}
 	}
 	p.mempoolLock.Unlock()
+	hardness := account.EffectiveHardnessForMining(parentBlocks, p.genesis, len(selected))
+	if !account.WinsLottery(tickets, hardness, draw) {
+		// The optimistic precheck may pass with a larger pending mempool than the
+		// final valid selection. Re-check against the exact candidate before mining.
+		p.lotteryMisses.Add(1)
+		return nil
+	}
+	p.lotteryWins.Add(1)
 
 	block := account.NewCandidateBlock(p.miner, slot, parentHash, selected, p.genesis.Seed)
 	payload, err := json.Marshal(block)
@@ -584,12 +1054,25 @@ func (p *Peer) MineOneSlot(slot int) *account.Block {
 	msgID := base64.StdEncoding.EncodeToString(hash[:])
 	msg := &Message{Type: helpers.BLOCK_MESSAGE_TYPE, MsgID: msgID, From: p.id, Payload: payload}
 
-	if !p.handleBlock(msg) {
+	if !p.ApplyBlock(block) {
 		return nil
 	}
 	p.minedBlocks.Add(1)
 	p.FloodNetwork(msg)
 	return block
+}
+
+func (p *Peer) optimisticLotteryHardness() int {
+	if p.genesis == nil {
+		return 0
+	}
+	if p.genesis.DynamicHardnessMax > 0 {
+		return p.genesis.DynamicHardnessMax
+	}
+	if p.genesis.Hardness > 0 {
+		return p.genesis.Hardness
+	}
+	return 1
 }
 
 // ApplyBlock force-applies a block locally (used by the handin demo for deterministic convergence).
@@ -606,10 +1089,14 @@ func (p *Peer) ApplyBlock(block *account.Block) bool {
 	if err == nil {
 		p.mempoolLock.Lock()
 		for _, tx := range txs {
-			delete(p.mempool, tx.ID)
+			if _, exists := p.mempool[tx.ID]; exists {
+				delete(p.mempool, tx.ID)
+				logEvent("mempool_tx_included", map[string]any{"tx": tx.ID, "block": blockHexString(block), "slot": block.Slot})
+			}
 		}
 		p.mempoolLock.Unlock()
 	}
+	p.pruneInvalidMempool("block_applied")
 	return true
 }
 
@@ -639,10 +1126,16 @@ func (p *Peer) handlePoSTransaction(msg *Message) bool {
 		return false
 	}
 	// Cheap local checks before inserting to mempool.
-	if tx.Amount < 0 || (!tx.IsEVM() && tx.Amount < 1) {
+	if tx.Amount < 0 || (!tx.IsEVM() && !tx.IsNFT() && !tx.IsAMM() && tx.Amount < 1) {
+		logEvent("mempool_tx_rejected", map[string]any{"tx": tx.ID, "from": tx.From, "kind": tx.Kind, "reason": "invalid_amount"})
 		return false
 	}
 	if !tx.Verify(tx.From) {
+		logEvent("mempool_tx_rejected", map[string]any{"tx": tx.ID, "from": tx.From, "kind": tx.Kind, "reason": "verify_failed"})
+		return false
+	}
+	if tx.IsAMM() && !p.bestLedgerWouldAccept(&tx) {
+		logEvent("mempool_tx_rejected", map[string]any{"tx": tx.ID, "from": tx.From, "kind": tx.Kind, "reason": "best_ledger_reject"})
 		return false
 	}
 
@@ -660,10 +1153,12 @@ func (p *Peer) handlePoSTransaction(msg *Message) bool {
 			for id, pending := range p.mempool {
 				if pending.IsEVM() && strings.EqualFold(pending.From, tx.From) && pending.Nonce == tx.Nonce {
 					delete(p.mempool, id)
+					logEvent("mempool_tx_replaced", map[string]any{"oldTx": id, "newTx": tx.ID, "from": tx.From, "nonce": tx.Nonce})
 				}
 			}
 		}
 		p.mempool[tx.ID] = tx
+		logEvent("mempool_tx_added", map[string]any{"tx": tx.ID, "from": tx.From, "to": tx.To, "kind": tx.Kind, "nonce": tx.Nonce, "isEVM": tx.IsEVM(), "isAMM": tx.IsAMM(), "isNFT": tx.IsNFT()})
 	}
 	p.mempoolLock.Unlock()
 
@@ -671,6 +1166,59 @@ func (p *Peer) handlePoSTransaction(msg *Message) bool {
 	hist.receivedFrom = append(hist.receivedFrom, msg.From)
 	p.msgHistory[msg.MsgID] = hist
 	return !exists
+}
+
+func (p *Peer) bestLedgerWouldAccept(tx *account.SignedTransaction) bool {
+	if p.blockchain == nil {
+		return false
+	}
+	ledger := account.LedgerFromBlockchain(p.blockchain, 0)
+	return ledger.Transaction(tx)
+}
+
+func (p *Peer) pruneInvalidMempool(reason string) int {
+	if p.blockchain == nil {
+		return 0
+	}
+	ledger := account.LedgerFromBlockchain(p.blockchain, 0)
+	p.mempoolLock.Lock()
+	pending := make([]account.SignedTransaction, 0, len(p.mempool))
+	for _, tx := range p.mempool {
+		pending = append(pending, tx)
+	}
+	p.mempoolLock.Unlock()
+
+	keep := make(map[string]bool, len(pending))
+	progress := true
+	for progress {
+		progress = false
+		for _, tx := range pending {
+			if keep[tx.ID] {
+				continue
+			}
+			candidate := tx
+			if !ledger.Transaction(&candidate) {
+				continue
+			}
+			keep[tx.ID] = true
+			progress = true
+		}
+	}
+
+	removed := 0
+	for _, tx := range pending {
+		if keep[tx.ID] {
+			continue
+		}
+		p.mempoolLock.Lock()
+		if _, exists := p.mempool[tx.ID]; exists {
+			delete(p.mempool, tx.ID)
+			removed++
+			logEvent("mempool_tx_evicted", map[string]any{"tx": tx.ID, "from": tx.From, "kind": tx.Kind, "nonce": tx.Nonce, "reason": reason})
+		}
+		p.mempoolLock.Unlock()
+	}
+	return removed
 }
 
 func (p *Peer) handleBlock(msg *Message) bool {
@@ -690,6 +1238,17 @@ func (p *Peer) handleBlock(msg *Message) bool {
 	p.floodingLock.Unlock()
 
 	if !p.blockchain.AddBlock(&block) {
+		if !p.hasBlockHash(block.ParentHash) {
+			local := p.chainStatus()
+			if local.GenesisHash != "" {
+				logEvent("block_parent_missing_sync_requested", map[string]any{
+					"peerID":        msg.From,
+					"missingParent": block.ParentHash,
+					"localHeight":   local.Height,
+				})
+				p.requestChainSync(msg.From, chainSyncRequest{GenesisHash: local.GenesisHash, FromHeight: 0})
+			}
+		}
 		return false
 	}
 
@@ -702,10 +1261,14 @@ func (p *Peer) handleBlock(msg *Message) bool {
 	if err == nil {
 		p.mempoolLock.Lock()
 		for _, tx := range txs {
-			delete(p.mempool, tx.ID)
+			if _, exists := p.mempool[tx.ID]; exists {
+				delete(p.mempool, tx.ID)
+				logEvent("mempool_tx_included", map[string]any{"tx": tx.ID, "block": blockHexString(&block), "slot": block.Slot})
+			}
 		}
 		p.mempoolLock.Unlock()
 	}
+	p.pruneInvalidMempool("block_received")
 
 	p.floodingLock.Lock()
 	hist := *NewMessageHistory(msg)
@@ -713,6 +1276,18 @@ func (p *Peer) handleBlock(msg *Message) bool {
 	p.msgHistory[msg.MsgID] = hist
 	p.floodingLock.Unlock()
 	return true
+}
+
+func (p *Peer) hasBlockHash(hash string) bool {
+	if hash == "" || p.blockchain == nil {
+		return false
+	}
+	for _, block := range p.blockchain.BlocksSnapshot() {
+		if blockHashString(block) == hash {
+			return true
+		}
+	}
+	return false
 }
 
 // Handle receiving a transaction from another peer on the network.
@@ -786,11 +1361,54 @@ func (p *Peer) connectPayload() connectPayload {
 		p.peerAddresses[p.id] = self
 		addresses = append(addresses, self)
 	}
+	status := p.chainStatusLocked()
 	return connectPayload{
-		Peers:     slices.Collect(maps.Keys(p.conns)),
-		Addresses: uniquePeerAddresses(addresses),
-		Validator: p.validatorAccountLocked(),
+		Peers:       slices.Collect(maps.Keys(p.conns)),
+		Addresses:   uniquePeerAddresses(addresses),
+		Validator:   p.validatorAccountLocked(),
+		GenesisHash: status.GenesisHash,
+		Height:      status.Height,
+		BestHash:    status.BestHash,
 	}
+}
+
+func (p *Peer) chainStatus() chainStatusSummary {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	return p.chainStatusLocked()
+}
+
+func (p *Peer) chainStatusLocked() chainStatusSummary {
+	if p.blockchain == nil {
+		return chainStatusSummary{}
+	}
+	blocks := p.blockchain.CanonicalBlocks(0)
+	if len(blocks) == 0 {
+		return chainStatusSummary{}
+	}
+	return chainStatusSummary{
+		GenesisHash: genesisContentHash(blocks[0]),
+		Height:      len(blocks) - 1,
+		BestHash:    blockHashString(blocks[len(blocks)-1]),
+	}
+}
+
+func blockHashString(block account.Block) string {
+	hash := block.GetBlockHash()
+	return base64.StdEncoding.EncodeToString(hash[:])
+}
+
+func blockHexString(block *account.Block) string {
+	if block == nil {
+		return ""
+	}
+	hash := block.GetBlockHash()
+	return "0x" + fmt.Sprintf("%x", hash[:])
+}
+
+func genesisContentHash(block account.Block) string {
+	hash := sha256.Sum256([]byte(block.MetaData))
+	return base64.StdEncoding.EncodeToString(hash[:])
 }
 
 func (p *Peer) knownPeerAddresses() []PeerAddress {
@@ -950,7 +1568,7 @@ func (p *Peer) AuthorizedPeers() []PeerAuthorization {
 	}
 	rows := make([]PeerAuthorization, 0, len(validators))
 	for peerID, validator := range validators {
-		stake := p.BestBalanceOf(validator)
+		stake := p.BalanceOf(validator)
 		_, connected := conns[peerID]
 		rows = append(rows, PeerAuthorization{
 			PeerID:     peerID,
@@ -968,6 +1586,17 @@ func (p *Peer) AuthorizedPeers() []PeerAuthorization {
 		return rows[i].PeerID < rows[j].PeerID
 	})
 	return rows
+}
+
+func (p *Peer) ActiveAuthorizedPeers() []PeerAuthorization {
+	rows := p.AuthorizedPeers()
+	active := make([]PeerAuthorization, 0, len(rows))
+	for _, row := range rows {
+		if row.Local || row.Connected {
+			active = append(active, row)
+		}
+	}
+	return active
 }
 
 func (p *Peer) IsAuthorizedValidator(accountName string) bool {
@@ -1002,11 +1631,105 @@ func (p *Peer) MempoolSize() int {
 	return len(p.mempool)
 }
 
+type MempoolTxSummary struct {
+	ID                   string `json:"id"`
+	Kind                 string `json:"kind"`
+	From                 string `json:"from"`
+	To                   string `json:"to"`
+	Amount               int    `json:"amount"`
+	Nonce                uint64 `json:"nonce"`
+	ChainID              int64  `json:"chainId,omitempty"`
+	IsEVM                bool   `json:"isEvm"`
+	IsAMM                bool   `json:"isAmm"`
+	IsNFT                bool   `json:"isNft"`
+	BestLedgerWouldApply bool   `json:"bestLedgerWouldApply"`
+}
+
+func (p *Peer) MempoolSummaries() []MempoolTxSummary {
+	p.mempoolLock.Lock()
+	pending := make([]account.SignedTransaction, 0, len(p.mempool))
+	for _, tx := range p.mempool {
+		pending = append(pending, tx)
+	}
+	p.mempoolLock.Unlock()
+	sort.Slice(pending, func(i, j int) bool {
+		return pending[i].ID < pending[j].ID
+	})
+	out := make([]MempoolTxSummary, 0, len(pending))
+	for _, tx := range pending {
+		candidate := tx
+		out = append(out, MempoolTxSummary{
+			ID:                   tx.ID,
+			Kind:                 tx.Kind,
+			From:                 tx.From,
+			To:                   tx.To,
+			Amount:               tx.Amount,
+			Nonce:                tx.Nonce,
+			ChainID:              tx.ChainID,
+			IsEVM:                tx.IsEVM(),
+			IsAMM:                tx.IsAMM(),
+			IsNFT:                tx.IsNFT(),
+			BestLedgerWouldApply: p.bestLedgerWouldAccept(&candidate),
+		})
+	}
+	return out
+}
+
 func (p *Peer) ChainHeight() int {
 	if p.blockchain == nil {
 		return 0
 	}
 	return p.blockchain.BestHeight()
+}
+
+func (p *Peer) AverageRecentBlockSlots(window int) int {
+	if p.blockchain == nil {
+		return 0
+	}
+	blocks := p.blockchain.CanonicalBlocks(0)
+	if len(blocks) < 2 {
+		return 0
+	}
+	if window < 1 {
+		window = 1
+	}
+	start := len(blocks) - 1 - window
+	if start < 0 {
+		start = 0
+	}
+	total := 0
+	count := 0
+	for i := start + 1; i < len(blocks); i++ {
+		delta := blocks[i].Slot - blocks[i-1].Slot
+		if delta <= 0 {
+			continue
+		}
+		total += delta
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return (total + count/2) / count
+}
+
+func (p *Peer) CurrentEffectiveHardness() int {
+	if p.blockchain == nil || p.genesis == nil {
+		return 0
+	}
+	return account.EffectiveHardnessForMining(p.blockchain.CanonicalBlocks(0), p.genesis, p.MempoolSize())
+}
+
+func (p *Peer) DynamicHardnessForkHeight() int {
+	if p.genesis == nil {
+		return 0
+	}
+	return p.genesis.DynamicHardnessForkHeight
+}
+
+func (p *Peer) DynamicHardnessActive() bool {
+	forkHeight := p.DynamicHardnessForkHeight()
+	return forkHeight > 0 && p.ChainHeight() >= forkHeight
 }
 
 func (p *Peer) UptimeSeconds() int64 {
@@ -1062,11 +1785,43 @@ func (p *Peer) BestBalanceOf(accountName string) int {
 	return account.LedgerFromBlockchain(p.blockchain, 0).GetBalance(accountName)
 }
 
+func (p *Peer) SupplySnapshot(reservedAddresses []string) SupplySnapshot {
+	if p.ledger == nil {
+		return SupplySnapshot{}
+	}
+	accounts := p.ledger.CopyAccounts()
+	reservedSet := make(map[string]bool, len(reservedAddresses))
+	for _, address := range reservedAddresses {
+		reservedSet[strings.ToLower(strings.TrimSpace(address))] = true
+	}
+	var total int
+	var reserved int
+	for accountName, balance := range accounts {
+		if balance <= 0 {
+			continue
+		}
+		total += balance
+		if reservedSet[strings.ToLower(accountName)] {
+			reserved += balance
+		}
+	}
+	circulating := total - reserved
+	if circulating < 0 {
+		circulating = 0
+	}
+	return SupplySnapshot{
+		TotalSupply:       total,
+		CirculatingSupply: circulating,
+		ReservedSupply:    reserved,
+		ReservedAddresses: reservedAddresses,
+	}
+}
+
 func (p *Peer) ValidatorStake() int {
-	if p.miner == nil {
+	if p.miner == nil || p.ledger == nil {
 		return 0
 	}
-	return p.BestBalanceOf(p.miner.SafeEncode())
+	return p.ledger.GetBalance(p.miner.SafeEncode())
 }
 
 func (p *Peer) NonceOf(accountName string) uint64 {
@@ -1081,6 +1836,92 @@ func (p *Peer) BestNonceOf(accountName string) uint64 {
 		return 0
 	}
 	return account.LedgerFromBlockchain(p.blockchain, 0).GetNonce(accountName)
+}
+
+func (p *Peer) BestNFTs() map[string]account.NFTToken {
+	if p.blockchain == nil {
+		return map[string]account.NFTToken{}
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).CopyNFTs()
+}
+
+func (p *Peer) BestNFT(collectionID string, tokenID string) (account.NFTToken, bool) {
+	if p.blockchain == nil {
+		return account.NFTToken{}, false
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).NFT(collectionID, tokenID)
+}
+
+func (p *Peer) BestNFTsByOwner(owner string) []account.NFTToken {
+	if p.blockchain == nil {
+		return []account.NFTToken{}
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).NFTsByOwner(owner)
+}
+
+func (p *Peer) BestAssetBalances(accountName string) map[string]int {
+	if p.blockchain == nil {
+		return map[string]int{}
+	}
+	ledger := account.LedgerFromBlockchain(p.blockchain, 0)
+	balances := ledger.CopyAssetBalances()
+	out := map[string]int{account.AssetPKN: ledger.GetBalance(strings.ToLower(strings.TrimSpace(accountName)))}
+	for asset, byAccount := range balances {
+		value := byAccount[strings.ToLower(strings.TrimSpace(accountName))]
+		if value != 0 {
+			out[asset] = value
+		}
+	}
+	return out
+}
+
+func (p *Peer) BestAMMPools() map[string]account.AMMPool {
+	if p.blockchain == nil {
+		return map[string]account.AMMPool{}
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).CopyAMMPools()
+}
+
+func (p *Peer) BestAMMPool(poolID string) (account.AMMPool, bool) {
+	if p.blockchain == nil {
+		return account.AMMPool{}, false
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).AMMPool(poolID)
+}
+
+func (p *Peer) BestEVMCode(address string) []byte {
+	if p.blockchain == nil {
+		return nil
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).GetEVMCode(address)
+}
+
+func (p *Peer) BestEVMStorage(address string, slot string) string {
+	if p.blockchain == nil {
+		return "0x0000000000000000000000000000000000000000000000000000000000000000"
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).GetEVMStorage(address, slot)
+}
+
+func (p *Peer) BestEVMAccounts() map[string]account.EVMAccount {
+	if p.blockchain == nil {
+		return map[string]account.EVMAccount{}
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).CopyEVMAccounts()
+}
+
+func (p *Peer) BestEVMCall(from string, to string, input []byte) ([]byte, bool) {
+	if p.blockchain == nil {
+		return nil, false
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).CallEVM(from, to, input)
+}
+
+func (p *Peer) EVMReceipt(txHash string) (account.EVMReceipt, bool) {
+	if p.blockchain == nil {
+		return account.EVMReceipt{}, false
+	}
+	return account.LedgerFromBlockchain(p.blockchain, 0).EVMReceipt(txHash)
 }
 
 func (p *Peer) PendingNonceOf(accountName string) uint64 {
