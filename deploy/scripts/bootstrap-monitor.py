@@ -42,19 +42,26 @@ def tcp_reachable(host, port, timeout):
 
 def health_reachable(url, timeout):
     if not url:
-        return True, ""
+        return True, "", ""
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
+            raw = response.read()
             if 200 <= response.status < 300:
-                return True, ""
-            return False, f"http_status_{response.status}"
+                version = ""
+                try:
+                    payload = json.loads(raw.decode("utf-8"))
+                    version = str(payload.get("version") or "")
+                except Exception:
+                    version = ""
+                return True, "", version
+            return False, f"http_status_{response.status}", ""
     except Exception as error:
-        return False, str(error)
+        return False, str(error), ""
 
 
 def probe(candidate, timeout):
     tcp_ok, tcp_error = tcp_reachable(candidate["host"], int(candidate["port"]), timeout)
-    health_ok, health_error = health_reachable(candidate.get("opsHealthUrl", ""), timeout)
+    health_ok, health_error, version = health_reachable(candidate.get("opsHealthUrl", ""), timeout)
     live = bool(candidate.get("enabled", True)) and tcp_ok and health_ok
     return {
         "at": iso_now(),
@@ -65,6 +72,7 @@ def probe(candidate, timeout):
         "live": live,
         "tcpOk": tcp_ok,
         "healthOk": health_ok,
+        "version": version,
         "error": "" if live else (health_error or tcp_error),
     }
 

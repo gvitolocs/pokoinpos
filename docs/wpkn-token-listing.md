@@ -10,6 +10,10 @@
 - PancakeSwap pair: `0x86294c008542C2707B9f67e3E4BA2d03B7bF7451`
 - Logo URL: `https://explorer.pokoin.com/wpkn/logo.png`
 - Reserve manifest: `https://explorer.pokoin.com/wpkn-reserve.json`
+- Total supply: `2,000,000 wPKN`
+- Ownership: renounced to `0x0000000000000000000000000000000000000000`
+- Ownership renounce tx:
+  `0x967f79ae8f48dc0d6571ee2dc13ff7bcd0c125b695d91b1b9e667bb016b2aade`
 
 ## Prepared Assets
 
@@ -24,13 +28,12 @@ BscScan token logo/profile updates require a token update request from a BscScan
 Before submission:
 
 1. Verify the contract source on BscScan.
-2. Sign ownership for `0x91A17E2bddfF839078BD395482B38e4AC15276f4` using the owner wallet.
-3. Submit:
+2. Submit:
    - Token name: `Wrapped PKN`
    - Symbol: `wPKN`
    - Website: `https://pokoin.com`
    - Logo: `metadata/token-assets/wpkn/logo.png`
-   - Description: `Wrapped PKN is the BNB Chain representation of native PKN from PokoinPoS, backed 1:1 by a native PKN reserve.`
+   - Description: `Wrapped PKN is the fixed-supply BNB Chain representation of native PKN from PokoinPoS, backed 1:1 by a native PKN reserve.`
    - Project explorer: `https://explorer.pokoin.com`
    - Reserve proof: `https://explorer.pokoin.com/wpkn-reserve.json`
 

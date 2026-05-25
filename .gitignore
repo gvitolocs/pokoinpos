@@ -6,6 +6,8 @@
 
 # dependencies
 node_modules/
+.venv/
+bin/
 
 # environment
 .env
@@ -13,8 +15,15 @@ node_modules/
 .env.*.local
 secrets/
 keys/
+deploy/env/*.env
+!deploy/env/*.env.example
 ssh-key*.key
 ssh-key*.pub
 *firebase-adminsdk*.json
 .pokoinpos-state/
 .pokoinpos-peer*-state/
+
+# generated caches
+.wrangler/
+__pycache__/
+deploy/scripts/__pycache__/

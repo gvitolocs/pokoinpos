@@ -5,8 +5,9 @@ This folder stores the canonical Pokoin project banner assets.
 ## Files
 
 - `pokoin-project-banner-1360x430-original.png`: original banner before the
-  white-eye correction.
-- `pokoin-project-banner-1360x430.png`: corrected banner with white eye pixels.
+  monster-coin replacement.
+- `pokoin-project-banner-1360x430.png`: current banner with the approved
+  monster-coin artwork.
 
 ## Dimensions
 
@@ -29,40 +30,19 @@ The banner style should remain:
 - marketplace rails copy,
 - small colored rail bars on the right.
 
-## Logo Correction
+## Logo Replacement
 
-The banner was generated with the older coin logo where the eye pixels were not
-white. Do not redesign the whole banner unless explicitly requested.
+The banner logo has been replaced with the approved monster-coin artwork from
+`src/logo/assets/pokoin.svg`. Do not restore the earlier Pikachu-like artwork.
 
-For the current banner, only the two true eye highlight regions in the left coin
-logo were changed from the banner's dark teal/greenish eye color to white.
-The regions include the adjacent teal remnant line created by scaling:
-
-```text
-Left eye region:  x=155..160, y=190..194
-Right eye region: x=175..179, y=190..194
-Color:           RGBA(255, 255, 255, 255)
-```
-
-Those coordinates come from matching the original 32x32 SVG grid to the banner:
+The current banner keeps the original composition and patches the left logo
+area by scaling the approved 32x32 SVG into 5px pixel blocks:
 
 ```text
 banner origin: x=90, y=135
 block size:    5
-SVG eyes:      (13,11), (17,11)
+logo size:     160 x 160
 ```
-
-In the original banner, the greenish remnants were detected at:
-
-```text
-Left remnant:  x=157..160, y=192..194
-Right remnant: x=176..178, y=192..194
-```
-
-Earlier attempted origins/coordinates were wrong and should not be used:
-
-- origin `100,145` with eyes `(12,13)`, `(20,13)`
-- origin `100,145` with eyes `(13,11)`, `(17,11)`
 
 ## Regeneration Rule
 
@@ -74,7 +54,7 @@ src/logo/LOGO_INSTRUCTIONS.md
 
 Important:
 
-- preserve white eyes,
+- use the approved monster-coin SVG from `src/logo/assets/pokoin.svg`,
 - preserve pixel-art edges,
 - avoid blur/anti-aliasing on the logo,
 - keep the same final banner size unless a new target platform requires another

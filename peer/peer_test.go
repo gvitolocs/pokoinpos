@@ -8,6 +8,7 @@ import (
 	"peer/helpers"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,6 +24,81 @@ func TestNewPeer(t *testing.T) {
 	}
 	if peer2.listenport != port2 {
 		t.Errorf("Should be %d", port2)
+	}
+}
+
+func TestSetAdvertiseHostMakesPeerIDHashed(t *testing.T) {
+	peer := NewPeer(43000)
+	peer.conns[peer.id] = nil
+	peer.recordPeerValidator(peer.id, "validator")
+
+	peer.SetAdvertiseHost("141.147.62.244")
+
+	if !strings.HasPrefix(peer.id, "peer-") {
+		t.Fatalf("peer id should be hashed: got %q", peer.id)
+	}
+	if strings.Contains(peer.id, "141.147.62.244") || strings.Contains(peer.id, "43000") {
+		t.Fatalf("peer id should not expose host or port: got %q", peer.id)
+	}
+	if !peer.hasConnection(peer.id) {
+		t.Fatalf("self connection should be rekeyed to new peer id")
+	}
+	if peer.peerValidators[peer.id] != "validator" {
+		t.Fatalf("validator identity should be rekeyed to new peer id")
+	}
+}
+
+func TestPeerIDKeepsSamePortOnDifferentHostsUnique(t *testing.T) {
+	id1 := peerID("92.5.153.117", 43000)
+	id2 := peerID("141.147.62.244", 43000)
+	if id1 == id2 {
+		t.Fatalf("same port on different hosts must not collide: %q", id1)
+	}
+}
+
+func TestUniquePeerAddressesKeepsSamePortOnDifferentHosts(t *testing.T) {
+	addresses := uniquePeerAddresses([]PeerAddress{
+		{ID: peerID("92.5.153.117", 43000), Host: "92.5.153.117", Port: 43000},
+		{ID: peerID("141.147.62.244", 43000), Host: "141.147.62.244", Port: 43000},
+	})
+
+	if len(addresses) != 2 {
+		t.Fatalf("same port on different hosts must not collide: %+v", addresses)
+	}
+}
+
+func TestBootstrapStatusesUseHashedPeerIDs(t *testing.T) {
+	addresses := bootstrapStatusesToAddresses([]BootstrapPeerStatus{
+		{ID: "oracle-seed-1", Host: "92.5.153.117", Port: 43000},
+		{ID: "oracle-peer-3", Host: "141.147.62.244", Port: 43000},
+	})
+
+	if len(addresses) != 2 {
+		t.Fatalf("expected two bootstrap addresses: %+v", addresses)
+	}
+	for _, address := range addresses {
+		if !strings.HasPrefix(address.ID, "peer-") {
+			t.Fatalf("bootstrap address should use hashed peer id: %+v", address)
+		}
+		if strings.HasPrefix(address.ID, "oracle-") || strings.Contains(address.ID, address.Host) {
+			t.Fatalf("bootstrap peer id should not expose manifest label or host: %+v", address)
+		}
+	}
+	if addresses[0].ID == addresses[1].ID {
+		t.Fatalf("same port on different bootstrap hosts must not collide: %+v", addresses)
+	}
+}
+
+func TestShouldMineSlotPrioritizesPendingTransactions(t *testing.T) {
+	cfg := NodeConfig{IdleSlotInterval: 300}
+	if !shouldMineSlot(2, 1, cfg) {
+		t.Fatalf("pending transactions should mine immediately")
+	}
+	if shouldMineSlot(2, 0, cfg) {
+		t.Fatalf("empty mempool should wait for heartbeat interval")
+	}
+	if !shouldMineSlot(300, 0, cfg) {
+		t.Fatalf("empty mempool should mine heartbeat blocks")
 	}
 }
 

@@ -1,8 +1,18 @@
 {
+  "bootstrap": {
+    "defaultJoinPeer": {
+      "host": "92.5.153.117",
+      "port": 43000
+    },
+    "fallbackPeers": [
+      "92.5.153.117:43000",
+      "130.162.242.213:43001"
+    ]
+  },
   "candidates": [
     {
       "ageDays": 365,
-      "externalObservers": 3,
+      "externalObservers": 4,
       "grandfathered": true,
       "host": "92.5.153.117",
       "id": "oracle-seed-1",
@@ -10,11 +20,12 @@
       "port": 43000,
       "status": "bootstrap",
       "uptimeRatio365d": 1.0,
+      "version": "PokoinPoS/v0.2.0",
       "vettingUptimeRatio": 0.0
     },
     {
       "ageDays": 365,
-      "externalObservers": 3,
+      "externalObservers": 4,
       "grandfathered": true,
       "host": "130.162.242.213",
       "id": "oracle-seed-2",
@@ -22,11 +33,12 @@
       "port": 43001,
       "status": "bootstrap",
       "uptimeRatio365d": 1.0,
+      "version": "PokoinPoS/v0.2.0",
       "vettingUptimeRatio": 0.0
     },
     {
       "ageDays": 0,
-      "externalObservers": 3,
+      "externalObservers": 4,
       "grandfathered": false,
       "host": "141.147.62.244",
       "id": "oracle-peer-3",
@@ -34,11 +46,12 @@
       "port": 43000,
       "status": "vetting",
       "uptimeRatio365d": 1.0,
+      "version": "PokoinPoS/v0.2.0",
       "vettingUptimeRatio": 1.0
     },
     {
       "ageDays": 0,
-      "externalObservers": 3,
+      "externalObservers": 4,
       "grandfathered": false,
       "host": "92.5.23.133",
       "id": "oracle-peer-4",
@@ -46,18 +59,28 @@
       "port": 43001,
       "status": "vetting",
       "uptimeRatio365d": 1.0,
+      "version": "PokoinPoS/v0.2.0",
       "vettingUptimeRatio": 1.0
     }
   ],
+  "evm": {
+    "chainId": 26062026,
+    "networkId": "26062026"
+  },
   "fallbackPeers": [
     "92.5.153.117:43000",
     "130.162.242.213:43001"
   ],
-  "generatedAt": "2026-05-16T14:20:16Z",
+  "generatedAt": "2026-05-16T21:25:54Z",
+  "network": {
+    "bootstrapManifestUrl": "https://pokoin.com/bootstrap-peers.json",
+    "bootstrapRefreshIntervalHours": 24,
+    "name": "PokoinPoS"
+  },
   "peers": [
     {
       "ageDays": 365,
-      "externalObservers": 3,
+      "externalObservers": 4,
       "grandfathered": true,
       "host": "92.5.153.117",
       "id": "oracle-seed-1",
@@ -65,11 +88,12 @@
       "port": 43000,
       "status": "bootstrap",
       "uptimeRatio365d": 1.0,
+      "version": "PokoinPoS/v0.2.0",
       "vettingUptimeRatio": 0.0
     },
     {
       "ageDays": 365,
-      "externalObservers": 3,
+      "externalObservers": 4,
       "grandfathered": true,
       "host": "130.162.242.213",
       "id": "oracle-seed-2",
@@ -77,6 +101,7 @@
       "port": 43001,
       "status": "bootstrap",
       "uptimeRatio365d": 1.0,
+      "version": "PokoinPoS/v0.2.0",
       "vettingUptimeRatio": 0.0
     }
   ],

@@ -1,0 +1,273 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+3 0 obj
+<< /Length 3568 >>
+stream
+BT
+/F2 16 Tf
+1 0 0 1 54 760 Tm (PKN Native Asset Self-Assessment) Tj
+/F1 10 Tf
+1 0 0 1 54 722 Tm (Date: 2026-05-16) Tj
+/F2 13 Tf
+1 0 0 1 54 701 Tm (Important Disclaimer) Tj
+/F1 10 Tf
+1 0 0 1 54 675 Tm (This document is a project self-assessment prepared by the Pokoin team for) Tj
+/F1 10 Tf
+1 0 0 1 54 662 Tm (informational and compliance-intake purposes. It is not a legal opinion, is not) Tj
+/F1 10 Tf
+1 0 0 1 54 649 Tm (legal advice, and has not been prepared, reviewed, or signed by external legal) Tj
+/F1 10 Tf
+1 0 0 1 54 636 Tm (counsel. Any platform, exchange, on-ramp provider, or reviewer that requires a) Tj
+/F1 10 Tf
+1 0 0 1 54 623 Tm (formal legal opinion should request one from qualified legal counsel in the) Tj
+/F1 10 Tf
+1 0 0 1 54 610 Tm (relevant jurisdiction.) Tj
+/F2 13 Tf
+1 0 0 1 54 589 Tm (Asset Summary) Tj
+/F1 10 Tf
+1 0 0 1 54 563 Tm (- Asset name: Pokoin) Tj
+/F1 10 Tf
+1 0 0 1 54 550 Tm (- Ticker symbol: PKN) Tj
+/F1 10 Tf
+1 0 0 1 54 537 Tm (- Asset type: native blockchain coin) Tj
+/F1 10 Tf
+1 0 0 1 54 524 Tm (- Native network: PokoinPoS) Tj
+/F1 10 Tf
+1 0 0 1 54 511 Tm (- Chain ID: 26062026) Tj
+/F1 10 Tf
+1 0 0 1 54 498 Tm (- Network ID: 26062026) Tj
+/F1 10 Tf
+1 0 0 1 54 485 Tm (- Decimals: 18) Tj
+/F1 10 Tf
+1 0 0 1 54 472 Tm (- Official website: https://pokoin.com) Tj
+/F1 10 Tf
+1 0 0 1 54 459 Tm (- Public explorer: https://explorer.pokoin.com) Tj
+/F1 10 Tf
+1 0 0 1 54 446 Tm (- Public RPC: https://rpc.pokoin.com/rpc) Tj
+/F1 10 Tf
+1 0 0 1 54 433 Tm (- Chain status endpoint: https://rpc.pokoin.com/chain/status) Tj
+/F1 10 Tf
+1 0 0 1 54 420 Tm (- Total supply endpoint: https://rpc.pokoin.com/chain/supply/total.txt) Tj
+/F1 10 Tf
+1 0 0 1 54 407 Tm (- Circulating supply endpoint: https://rpc.pokoin.com/chain/supply/circulating.txt) Tj
+/F1 10 Tf
+1 0 0 1 54 386 Tm (PKN is the native asset of the PokoinPoS blockchain. It is not issued as an) Tj
+/F1 10 Tf
+1 0 0 1 54 373 Tm (ERC-20, BEP-20, or other smart-contract token on a third-party chain. Because it) Tj
+/F1 10 Tf
+1 0 0 1 54 360 Tm (is a native coin, PKN does not have a token contract address and does not have a) Tj
+/F1 10 Tf
+1 0 0 1 54 347 Tm (token-contract owner that can be renounced.) Tj
+/F2 13 Tf
+1 0 0 1 54 326 Tm (Current Public Network Data) Tj
+/F1 10 Tf
+1 0 0 1 54 300 Tm (At the time this document was prepared, public endpoints reported:) Tj
+/F1 10 Tf
+1 0 0 1 54 279 Tm (- Total supply: 2,003,004,050 PKN) Tj
+/F1 10 Tf
+1 0 0 1 54 266 Tm (- Circulating supply: 2,001,004,050 PKN) Tj
+/F1 10 Tf
+1 0 0 1 54 253 Tm (- Public chain height: 395) Tj
+/F1 10 Tf
+1 0 0 1 54 240 Tm (- Public transaction count: 13) Tj
+/F1 10 Tf
+1 0 0 1 54 219 Tm (These values are live network values and may change as additional validator) Tj
+/F1 10 Tf
+1 0 0 1 54 206 Tm (rewards or transactions are included in future blocks. Reviewers should use the) Tj
+/F1 10 Tf
+1 0 0 1 54 193 Tm (public supply endpoints above for the latest numerical values.) Tj
+/F2 13 Tf
+1 0 0 1 54 172 Tm (Intended Purpose and Utility) Tj
+/F1 10 Tf
+1 0 0 1 54 146 Tm (PKN is intended to function as the native utility asset of PokoinPoS. Its) Tj
+/F1 10 Tf
+1 0 0 1 54 133 Tm (current and intended uses include:) Tj
+/F1 10 Tf
+1 0 0 1 54 112 Tm (- native value transfers on PokoinPoS;) Tj
+/F1 10 Tf
+1 0 0 1 54 99 Tm (- validator reward accounting;) Tj
+/F1 10 Tf
+1 0 0 1 54 86 Tm (- network settlement and balances;) Tj
+/F1 10 Tf
+1 0 0 1 54 73 Tm (- marketplace-related utility for the Pokoin/CardVault ecosystem;) Tj
+/F1 10 Tf
+1 0 0 1 54 60 Tm (- wallet transfers through native and EVM-style compatibility endpoints;) Tj
+ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 9 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Length 4194 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 54 760 Tm (- public explorer and RPC indexing for transparent verification.) Tj
+/F1 10 Tf
+1 0 0 1 54 739 Tm (PKN is not designed to represent equity, debt, dividends, revenue share,) Tj
+/F1 10 Tf
+1 0 0 1 54 726 Tm (profit participation, voting rights in a legal entity, or ownership of project) Tj
+/F1 10 Tf
+1 0 0 1 54 713 Tm (assets.) Tj
+/F2 13 Tf
+1 0 0 1 54 692 Tm (Native Coin, Not Token Contract) Tj
+/F1 10 Tf
+1 0 0 1 54 666 Tm (PKN is accounted for directly by the PokoinPoS ledger. This is analogous to ETH) Tj
+/F1 10 Tf
+1 0 0 1 54 653 Tm (on Ethereum or BNB on BNB Smart Chain: the native coin exists at protocol level) Tj
+/F1 10 Tf
+1 0 0 1 54 640 Tm (and does not require a token contract to track balances or transfers.) Tj
+/F1 10 Tf
+1 0 0 1 54 619 Tm (PokoinPoS exposes an EVM-style JSON-RPC compatibility layer so wallets can read) Tj
+/F1 10 Tf
+1 0 0 1 54 606 Tm (balances and submit signed native PKN transfers. This compatibility layer does) Tj
+/F1 10 Tf
+1 0 0 1 54 593 Tm (not make PKN an ERC-20/BEP-20 smart-contract token, and current PokoinPoS) Tj
+/F1 10 Tf
+1 0 0 1 54 580 Tm (documentation states that smart contract execution and ERC-20 token contracts) Tj
+/F1 10 Tf
+1 0 0 1 54 567 Tm (are not implemented for the native network at this stage.) Tj
+/F2 13 Tf
+1 0 0 1 54 546 Tm (Privacy Characteristics) Tj
+/F1 10 Tf
+1 0 0 1 54 520 Tm (PKN is not designed as a privacy coin. PokoinPoS uses a public ledger where) Tj
+/F1 10 Tf
+1 0 0 1 54 507 Tm (blocks, balances, transfers, supply data, validator information, and explorer) Tj
+/F1 10 Tf
+1 0 0 1 54 494 Tm (records are publicly visible through the official explorer and RPC endpoints.) Tj
+/F1 10 Tf
+1 0 0 1 54 481 Tm (The project does not implement transaction mixing, shielded addresses, stealth) Tj
+/F1 10 Tf
+1 0 0 1 54 468 Tm (addresses, confidential transactions, or similar privacy-oriented features.) Tj
+/F2 13 Tf
+1 0 0 1 54 447 Tm (Stablecoin and Security-Token Characteristics) Tj
+/F1 10 Tf
+1 0 0 1 54 421 Tm (PKN is not a stablecoin. It is not designed to maintain a fixed price relative) Tj
+/F1 10 Tf
+1 0 0 1 54 408 Tm (to fiat currency, commodities, securities, or another cryptoasset.) Tj
+/F1 10 Tf
+1 0 0 1 54 387 Tm (Based on the project's own self-assessment, PKN is intended as a native utility) Tj
+/F1 10 Tf
+1 0 0 1 54 374 Tm (coin for blockchain settlement and ecosystem access, not as a security token.) Tj
+/F1 10 Tf
+1 0 0 1 54 361 Tm (The project does not present PKN as a claim on equity, debt, profits, dividends,) Tj
+/F1 10 Tf
+1 0 0 1 54 348 Tm (interest, revenue share, or other regulated financial instruments.) Tj
+/F1 10 Tf
+1 0 0 1 54 327 Tm (This self-assessment is not a substitute for a formal legal opinion. If a) Tj
+/F1 10 Tf
+1 0 0 1 54 314 Tm (reviewer requires a legal classification under US, EU, UK, or other law, that) Tj
+/F1 10 Tf
+1 0 0 1 54 301 Tm (analysis should be performed by qualified legal counsel.) Tj
+/F2 13 Tf
+1 0 0 1 54 280 Tm (Regulation and Jurisdictional Notes) Tj
+/F1 10 Tf
+1 0 0 1 54 254 Tm (The project is operated as an internet-native software and blockchain project.) Tj
+/F1 10 Tf
+1 0 0 1 54 241 Tm (Development and infrastructure are currently associated with the European Union) Tj
+/F1 10 Tf
+1 0 0 1 54 228 Tm (and cloud infrastructure providers used for public nodes. The asset is not) Tj
+/F1 10 Tf
+1 0 0 1 54 215 Tm (currently offered under a specific regulated jurisdictional framework.) Tj
+/F1 10 Tf
+1 0 0 1 54 194 Tm (The project is not aware of PKN being regulated as a security, stablecoin, or) Tj
+/F1 10 Tf
+1 0 0 1 54 181 Tm (other regulated financial instrument in any jurisdiction at the time of this) Tj
+/F1 10 Tf
+1 0 0 1 54 168 Tm (self-assessment.) Tj
+/F2 13 Tf
+1 0 0 1 54 147 Tm (Related BNB Chain Representation) Tj
+/F1 10 Tf
+1 0 0 1 54 121 Tm (The project also maintains wPKN, a fixed-supply BNB Chain representation of) Tj
+/F1 10 Tf
+1 0 0 1 54 108 Tm (PKN for external DeFi visibility and liquidity discovery. wPKN is separate from) Tj
+/F1 10 Tf
+1 0 0 1 54 95 Tm (native PKN:) Tj
+/F1 10 Tf
+1 0 0 1 54 74 Tm (- Native asset: PKN on PokoinPoS) Tj
+/F1 10 Tf
+1 0 0 1 54 61 Tm (- BNB Chain representation: wPKN on BNB Smart Chain) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 9 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 1709 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 54 760 Tm (wPKN contract ownership has been renounced and its supply is fixed at) Tj
+/F1 10 Tf
+1 0 0 1 54 747 Tm (2,000,000 wPKN. This does not change the status of native PKN, which remains) Tj
+/F1 10 Tf
+1 0 0 1 54 734 Tm (the protocol-level coin of PokoinPoS.) Tj
+/F2 13 Tf
+1 0 0 1 54 713 Tm (Evidence Links) Tj
+/F1 10 Tf
+1 0 0 1 54 687 Tm (- Official website: https://pokoin.com) Tj
+/F1 10 Tf
+1 0 0 1 54 674 Tm (- Public explorer: https://explorer.pokoin.com) Tj
+/F1 10 Tf
+1 0 0 1 54 661 Tm (- Public RPC status: https://rpc.pokoin.com/chain/status) Tj
+/F1 10 Tf
+1 0 0 1 54 648 Tm (- Total supply: https://rpc.pokoin.com/chain/supply/total.txt) Tj
+/F1 10 Tf
+1 0 0 1 54 635 Tm (- Circulating supply: https://rpc.pokoin.com/chain/supply/circulating.txt) Tj
+/F1 10 Tf
+1 0 0 1 54 622 Tm (- Source code and documentation: https://github.com/newisdom/pokoinpos) Tj
+/F1 10 Tf
+1 0 0 1 54 609 Tm (- PokoinPoS chain metadata:) Tj
+/F1 10 Tf
+1 0 0 1 54 596 Tm (  https://github.com/newisdom/pokoinpos/blob/main/metadata/pokoinpos-chain.json) Tj
+/F2 13 Tf
+1 0 0 1 54 575 Tm (Conclusion) Tj
+/F1 10 Tf
+1 0 0 1 54 549 Tm (This project self-assessment describes PKN as the native utility coin of the) Tj
+/F1 10 Tf
+1 0 0 1 54 536 Tm (PokoinPoS public ledger. PKN is not a stablecoin, not a privacy coin, and not a) Tj
+/F1 10 Tf
+1 0 0 1 54 523 Tm (third-party-chain smart-contract token. It is intended for native network) Tj
+/F1 10 Tf
+1 0 0 1 54 510 Tm (transfers, validator rewards, settlement, and marketplace-related utility.) Tj
+/F1 10 Tf
+1 0 0 1 54 489 Tm (This document is provided for informational review only and should not be) Tj
+/F1 10 Tf
+1 0 0 1 54 476 Tm (treated as a legal opinion.) Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 9 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R] /Count 3 >>
+endobj
+10 0 obj
+<< /Type /Catalog /Pages 9 0 R >>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000000154 00000 n 
+0000003774 00000 n 
+0000003910 00000 n 
+0000008156 00000 n 
+0000008292 00000 n 
+0000010053 00000 n 
+0000010189 00000 n 
+0000010258 00000 n 
+trailer
+<< /Size 11 /Root 10 0 R >>
+startxref
+10308
+%%EOF

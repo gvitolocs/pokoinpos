@@ -48,6 +48,27 @@ def observer_count(observations):
     return len(observers)
 
 
+def latest_version(observations):
+    latest = None
+    for item in observations:
+        version = str(item.get("version") or "").strip()
+        if not version:
+            continue
+        at = parse_time(item.get("at"))
+        if at is None:
+            continue
+        if latest is None or at > latest[0]:
+            latest = (at, version)
+    return latest[1] if latest else ""
+
+
+def candidate_version(candidate, observations):
+    observed = latest_version(observations)
+    if observed:
+        return observed
+    return str(candidate.get("version") or "").strip()
+
+
 def age_days(candidate, now):
     first_seen = parse_time(candidate.get("firstSeenAt"))
     if first_seen is None:
@@ -133,6 +154,7 @@ def main():
                 "label": candidate.get("label", candidate["id"]),
                 "host": candidate["host"],
                 "port": int(candidate["port"]),
+                "version": candidate_version(candidate, observations),
                 "status": status,
                 "ageDays": age_days(candidate, now),
                 "externalObservers": external_observers,
@@ -149,6 +171,7 @@ def main():
                     "label": candidate.get("label", candidate["id"]),
                     "host": candidate["host"],
                     "port": int(candidate["port"]),
+                    "version": candidate_version(candidate, observations),
                     "status": status,
                     "ageDays": age_days(candidate, now),
                     "externalObservers": external_observers,
@@ -159,10 +182,28 @@ def main():
             )
 
     fallback = [f"{candidate['host']}:{int(candidate['port'])}" for candidate in candidates.get("candidates", []) if candidate.get("fallback", False)]
+    fallback_candidates = [candidate for candidate in candidates.get("candidates", []) if candidate.get("fallback", False)]
+    default_join = fallback_candidates[0] if fallback_candidates else None
     manifest = {
         "schemaVersion": 1,
         "generatedAt": iso_now(),
         "validForHours": 24,
+        "network": {
+            "name": "PokoinPoS",
+            "bootstrapManifestUrl": "https://pokoin.com/bootstrap-peers.json",
+            "bootstrapRefreshIntervalHours": 24,
+        },
+        "evm": {
+            "chainId": 26062026,
+            "networkId": "26062026",
+        },
+        "bootstrap": {
+            "fallbackPeers": fallback,
+            "defaultJoinPeer": {
+                "host": default_join["host"],
+                "port": int(default_join["port"]),
+            } if default_join else None,
+        },
         "policy": {
             "vettingDays": vetting_days,
             "vettingMinimumUptimeRatio": vetting_threshold,

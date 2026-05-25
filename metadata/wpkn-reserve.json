@@ -30,6 +30,9 @@
     "decimals": 18,
     "maxBackedSupply": "2000000",
     "totalSupply": "2000000",
+    "owner": "0x0000000000000000000000000000000000000000",
+    "ownershipStatus": "renounced",
+    "ownershipRenouncedTxHash": "0x967f79ae8f48dc0d6571ee2dc13ff7bcd0c125b695d91b1b9e667bb016b2aade",
     "deploymentTxHash": "0xe7d0bd3787a134e82c2477efe26a18f58d2322ef84ba10003bea4befa54a0c90"
   },
   "pancakeSwap": {
@@ -47,8 +50,9 @@
   },
   "rules": [
     "Circulating wPKN must never exceed reserved native PKN.",
-    "If native PKN is released from reserve, the matching wPKN must be burned first.",
-    "Any increase to wPKN supply requires updating this manifest and reserving the same amount of native PKN."
+    "wPKN ownership has been renounced, so no additional wPKN can be minted by an owner.",
+    "The 2,000,000 wPKN supply is fixed at the contract max backed supply.",
+    "If native PKN is released from reserve, the matching wPKN must be burned by holders or through market operations before reserve accounting is reduced."
   ],
   "status": "live",
   "lastUpdated": "2026-05-15"

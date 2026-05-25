@@ -1,14 +1,17 @@
 # Pokoin Logo Instructions
 
 This folder is the local source of truth for Pokoin / PKN / wPKN logo work.
+The approved current mark is the 32x32 pixel-art monster coin from
+`~/Downloads/Pokoin.svg`, replacing the earlier Pikachu-like artwork.
 
 ## Files
 
-- `pokoin-logo-source.svg`: original SVG source. Start from this when
+- `pokoin-logo-source.svg`: approved 32x32 SVG source. Start from this when
   regenerating assets.
-- `pokoin-logo-source-preview.png`: original small preview generated with the
-  first SVG export.
-- `pokoin-logo-cutout.svg`: transparent cutout version derived from the source.
+- `pokoin-logo-cutout.svg`: transparent SVG copy derived from the source.
+- `assets/`: local generated asset pack for the approved icon, including SVG,
+  PNG resolutions `16`, `24`, `32`, `48`, `64`, `96`, `128`, `180`, `192`,
+  `200`, `256`, `384`, `512`, `1024`, `2048`, `4096`, plus `favicon.ico`.
 - `pokoin-logo-4096-cutout.png`: high-resolution transparent master.
 - `pokoin-logo-1080-cutout.png`: 1080 transparent cutout export.
 - `pokoin-logo-1080-black-outline.png`: 1080 export with black outline and
@@ -37,10 +40,10 @@ Do not rename the public URL unless the third-party listing is also updated.
 
 ## Visual Rules
 
-- Preserve the original pixel-art shape from `pokoin-logo-source.svg`.
-- Preserve the two white eye pixels.
-- Remove only the white/near-white background connected to the SVG outer edge.
-- Do not remove interior white pixels.
+- Preserve the approved monster coin shape from `pokoin-logo-source.svg`.
+- Preserve the white highlight/eye pixels.
+- Keep the transparent background.
+- Do not reintroduce the older Pikachu-like mascot silhouette.
 - Keep the pixel-art / jagged border style.
 - Use nearest-neighbor scaling. Do not blur or anti-alias the pixel art.
 - The large website logo should be transparent/scontornato and not clipped.
@@ -52,12 +55,10 @@ Do not rename the public URL unless the third-party listing is also updated.
 For `https://explorer.pokoin.com/wpkn/logo.png`:
 
 - File name/path must stay `/wpkn/logo.png`.
-- PNG dimensions: `32x32`.
+- PNG dimensions: `200x200`.
 - Transparent background.
-- Original SVG-derived logo, not a manually redrawn badge.
-- Eyes stay white.
-- The circle should fit the square edge-to-edge: opaque bbox should be
-  `(0,0)-(31,31)` while the four corners remain transparent.
+- Original SVG-derived monster coin, not a manually redrawn badge.
+- White highlights/eyes stay white.
 - Use cache-busting only for testing, for example:
   `https://explorer.pokoin.com/wpkn/logo.png?v=<timestamp>`.
 
@@ -76,11 +77,8 @@ BscScan icon:
 
 The browser favicon can be a separate ICO-only variant:
 
-- Source from the approved local `metadata/token-assets/wpkn/logo.png`.
-- Do not modify the BscScan/token-list PNG when changing the favicon.
-- Very slightly round the ICO corners only, just enough to avoid a hard square
-  tab icon.
-- Keep the main icon and eyes unchanged.
+- Source from the approved local `pokoin-logo-source.svg`.
+- Keep the main icon and white highlights unchanged.
 - Expose `/favicon-96x96.png` as the explicit PNG favicon for Google Search.
 - Do not link `/favicon-48x48.png`; it is less clean than the exact `32x3`
   `96x96` version.
@@ -90,13 +88,21 @@ The browser favicon can be a separate ICO-only variant:
 
 The safest generation process is:
 
-1. Parse `pokoin-logo-source.svg`.
-2. Flood-fill only white/near-white pixels connected to the image border.
-3. Make that outside background transparent.
-4. Preserve all non-background pixels, including the two white eye pixels.
-5. Scale with nearest-neighbor to the target size.
-6. For website assets, generate larger PNGs: `192`, `512`, `1024`, `4096`.
-7. For BscScan/token-list assets, generate exactly `32x32`.
+1. Start from `pokoin-logo-source.svg`.
+2. Scale with nearest-neighbor/crisp pixel rendering to the target size.
+3. For website assets, generate `32`, `48`, `96`, `180`, `192`, `512`, and
+   `1024` PNGs.
+4. Generate `favicon.ico` from `16`, `32`, and `48` PNG entries.
+5. Copy the website icon set into `../cardvault/pokemon_card_vault/web/`.
+6. Copy `pokoin.svg`, `pokoin-192.png`, `pokoin-512.png`, and
+   `pokoin-1024.png` into `../hypemeter/public/`.
+7. Copy the token-list PNG to
+   `../cardvault/pokemon_card_vault/web/wpkn/logo.png` and
+   `metadata/token-assets/wpkn/logo.png`.
+8. Copy extension icons to `/Users/giuseppe/pokemon-card-extension/icons/` and
+   shared extension assets to `/Users/giuseppe/pokemon-card-extension/assets/`.
+9. Update `../cardvault/pokemon_card_vault/web/bimi.svg`; the Cloudflare BIMI
+   DNS record should stay `v=BIMI1; l=https://pokoin.com/bimi.svg;`.
 
 ## Deployment Notes
 

@@ -44,11 +44,15 @@ The public explorer UI reads from `rpc.pokoin.com`; it is not itself the node.
 
 ## Bootstrap Registry
 
-Public nodes fetch the dynamic bootstrap list from:
+Public nodes fetch the dynamic bootstrap list and fixed network defaults from:
 
 ```text
 https://pokoin.com/bootstrap-peers.json
 ```
+
+The manifest includes the default join peer, fallback peers, bootstrap refresh
+interval, EVM chain ID, and EVM network ID. New peer env files should keep only
+node-specific values unless you intentionally need a local override.
 
 The manifest is generated from observed node health. New candidate nodes spend
 14 days in vetting and must stay online for at least 95% of that window. After
@@ -56,7 +60,7 @@ vetting, a node remains a regular peer until it is 365 days old. Only then can
 it enter the annual bootstrap list, and only if it has at least 94% uptime over
 the previous 365 days. That uptime must be observed by at least 3 other peers;
 self-observation does not count. The current Oracle nodes are grandfathered as
-bootstrap peers and remain fallback peers through `POKOINPOS_BOOTSTRAP_PEERS`.
+bootstrap peers and remain fallback peers through the manifest.
 
 ## MetaMask
 

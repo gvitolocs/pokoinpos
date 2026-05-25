@@ -12,6 +12,10 @@ The first reserve allocation is `2,000,000 PKN`, backed 1:1 by native PKN held i
 - Token symbol: `wPKN`
 - Decimals: `18`
 - Max backed supply for this launch: `2,000,000 wPKN`
+- Current total supply: `2,000,000 wPKN`
+- Ownership: renounced to `0x0000000000000000000000000000000000000000`
+- Ownership renounce tx:
+  `0x967f79ae8f48dc0d6571ee2dc13ff7bcd0c125b695d91b1b9e667bb016b2aade`
 - Contract address: `0x91A17E2bddfF839078BD395482B38e4AC15276f4`
 - PancakeSwap pair: `0x86294c008542C2707B9f67e3E4BA2d03B7bF7451`
 - Contract artifact: `metadata/wpkn-bnb-mainnet.json`
@@ -122,3 +126,8 @@ reserved native PKN = 2,000,000
 ```
 
 If native PKN is removed from reserve, the matching amount of `wPKN` must be burned first.
+
+Because contract ownership has been renounced, no owner can mint additional
+`wPKN` or perform owner-only burns. The launched BNB Chain supply is fixed at
+`2,000,000 wPKN`; future reserve changes must be handled through holder burns,
+market operations, or a separately deployed contract version.

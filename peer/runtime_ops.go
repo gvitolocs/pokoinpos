@@ -11,14 +11,27 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 type OpsServer struct {
-	peer         *Peer
-	adminToken   string
-	evmChainID   int64
-	evmNetworkID string
-	bootstrap    *BootstrapRegistry
+	peer                    *Peer
+	adminToken              string
+	evmChainID              int64
+	evmNetworkID            string
+	bootstrap               *BootstrapRegistry
+	reservedSupplyAddresses []string
+}
+
+const nodeVersion = "PokoinPoS/v0.2.0"
+
+type SupplySnapshot struct {
+	TotalSupply       int      `json:"totalSupply"`
+	CirculatingSupply int      `json:"circulatingSupply"`
+	ReservedSupply    int      `json:"reservedSupply"`
+	ReservedAddresses []string `json:"reservedAddresses"`
 }
 
 type EndpointDescription struct {
@@ -51,14 +64,25 @@ type JSONRPCError struct {
 	Message string `json:"message"`
 }
 
-func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64, evmNetworkID string, bootstrap *BootstrapRegistry) error {
-	srv := &OpsServer{peer: peer, adminToken: adminToken, evmChainID: evmChainID, evmNetworkID: evmNetworkID, bootstrap: bootstrap}
+func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64, evmNetworkID string, bootstrap *BootstrapRegistry, reservedSupplyAddresses []string) error {
+	srv := &OpsServer{peer: peer, adminToken: adminToken, evmChainID: evmChainID, evmNetworkID: evmNetworkID, bootstrap: bootstrap, reservedSupplyAddresses: reservedSupplyAddresses}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", srv.health)
 	mux.HandleFunc("/ready", srv.ready)
 	mux.HandleFunc("/dashboard", srv.dashboard)
 	mux.HandleFunc("/deshboard", srv.dashboard)
 	mux.HandleFunc("/chain/status", srv.chainStatus)
+	mux.HandleFunc("/chain/info", srv.chainInfo)
+	mux.HandleFunc("/chain/exchange-info", srv.chainInfo)
+	mux.HandleFunc("/chain/supply", srv.chainSupply)
+	mux.HandleFunc("/chain/supply/total.txt", srv.totalSupplyText)
+	mux.HandleFunc("/chain/supply/circulating.txt", srv.circulatingSupplyText)
+	mux.HandleFunc("/chain/nfts", srv.chainNFTs)
+	mux.HandleFunc("/chain/nfts/", srv.chainNFTs)
+	mux.HandleFunc("/chain/swap/pools", srv.swapPools)
+	mux.HandleFunc("/chain/swap/pools/", srv.swapPools)
+	mux.HandleFunc("/chain/swap/balances/", srv.swapBalances)
+	mux.HandleFunc("/chain/swap/quote", srv.swapQuote)
 	mux.HandleFunc("/chain/validators", srv.validators)
 	mux.HandleFunc("/chain/bootstrap", srv.bootstrapStatus)
 	mux.HandleFunc("/metrics", srv.metrics)
@@ -71,9 +95,16 @@ func StartOpsServer(addr string, peer *Peer, adminToken string, evmChainID int64
 	mux.HandleFunc("/", srv.root)
 	mux.HandleFunc("/rpc", srv.rpc)
 	mux.HandleFunc("/admin/dashboard/status", srv.adminDashboardStatus)
+	mux.HandleFunc("/admin/mempool", srv.adminMempool)
 	mux.HandleFunc("/admin/mine", srv.mineSlot)
 	mux.HandleFunc("/admin/mint", srv.mint)
 	mux.HandleFunc("/admin/withdraw", srv.withdraw)
+	mux.HandleFunc("/admin/nft/mint", srv.nftMint)
+	mux.HandleFunc("/admin/nft/transfer", srv.nftTransfer)
+	mux.HandleFunc("/admin/swap/pools", srv.adminSwapPool)
+	mux.HandleFunc("/admin/swap/liquidity/add", srv.adminSwapAddLiquidity)
+	mux.HandleFunc("/admin/assets/credit", srv.adminAssetCredit)
+	mux.HandleFunc("/admin/assets/debit", srv.adminAssetDebit)
 	logEvent("ops_server_starting", map[string]any{"addr": addr})
 	return http.ListenAndServe(addr, mux)
 }
@@ -106,7 +137,7 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Summary:        "Liveness and compact node status for dashboards and load balancers.",
 				Authentication: "none",
 				ContentType:    "application/json",
-				ResponseFields: []string{"status", "currencySymbol", "peerCount", "chainHeight", "committedHeight", "finalityDepth", "mempoolDepth", "validatorStake", "acceptedBlocks", "acceptedTxs"},
+				ResponseFields: []string{"status", "version", "currencySymbol", "peerCount", "chainHeight", "committedHeight", "finalityDepth", "mempoolDepth", "validatorStake", "acceptedBlocks", "acceptedTxs"},
 				UseCases:       []string{"health page", "uptime checks", "load balancer probes"},
 			},
 			{
@@ -124,8 +155,17 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				Summary:        "Detailed chain, finality, peer, mempool, and uptime status.",
 				Authentication: "none",
 				ContentType:    "application/json",
-				ResponseFields: []string{"currencySymbol", "height", "committedHeight", "finalityDepth", "peerCount", "mempoolDepth", "validatorStake", "txCount", "acceptedBlocks", "minedBlocks", "uptimeSeconds"},
+				ResponseFields: []string{"version", "currencySymbol", "height", "committedHeight", "finalityDepth", "peerCount", "mempoolDepth", "validatorStake", "txCount", "acceptedBlocks", "minedBlocks", "uptimeSeconds"},
 				UseCases:       []string{"public health page", "chain explorer status", "node operations dashboard"},
+			},
+			{
+				Method:         http.MethodGet,
+				Path:           "/chain/info",
+				Summary:        "Exchange and scanner friendly network metadata, native token data, supply, finality, consensus, RPC, and latest block status.",
+				Authentication: "none",
+				ContentType:    "application/json",
+				ResponseFields: []string{"network", "nativeCurrency", "rpc", "explorer", "status", "supply", "consensus", "validators", "latestBlock"},
+				UseCases:       []string{"exchange listing", "block scanner config", "wallet registry", "market data integrations"},
 			},
 			{
 				Method:         http.MethodGet,
@@ -135,6 +175,44 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				ContentType:    "application/json",
 				ResponseFields: []string{"validators"},
 				UseCases:       []string{"node operator dashboard", "validator authorization checks", "peer diagnostics"},
+			},
+			{
+				Method:         http.MethodGet,
+				Path:           "/chain/nfts",
+				Summary:        "Native Pokoin NFT registry with token metadata and ownership.",
+				Authentication: "none",
+				ContentType:    "application/json",
+				ResponseFields: []string{"tokens", "count"},
+				QueryParams:    []string{"owner: optional wallet/account owner filter"},
+				UseCases:       []string{"Card Vault inventory", "native NFT explorer", "wallet ownership display"},
+			},
+			{
+				Method:         http.MethodGet,
+				Path:           "/chain/nfts/{collectionId}/{tokenId}",
+				Summary:        "Native Pokoin NFT token lookup by collection and token ID.",
+				Authentication: "none",
+				ContentType:    "application/json",
+				ResponseFields: []string{"collectionId", "tokenId", "owner", "metadataUri", "metadataHash", "imageUri", "mintTx", "lastTx"},
+				UseCases:       []string{"NFT detail page", "metadata integrity check", "ownership verification"},
+			},
+			{
+				Method:         http.MethodGet,
+				Path:           "/chain/swap/pools",
+				Summary:        "Native PokoinSwap AMM pool registry and reserves.",
+				Authentication: "none",
+				ContentType:    "application/json",
+				ResponseFields: []string{"pools", "count"},
+				UseCases:       []string{"swap UI", "liquidity dashboard", "native DEX discovery"},
+			},
+			{
+				Method:         http.MethodGet,
+				Path:           "/chain/swap/quote",
+				Summary:        "Native PokoinSwap deterministic quote for a pool and input amount.",
+				Authentication: "none",
+				ContentType:    "application/json",
+				QueryParams:    []string{"pool", "assetIn", "amountIn"},
+				ResponseFields: []string{"poolId", "assetIn", "assetOut", "amountIn", "amountOut", "feeBps"},
+				UseCases:       []string{"swap preview", "slippage checks", "Card Vault wallet quoting"},
 			},
 			{
 				Method:         http.MethodGet,
@@ -201,6 +279,15 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 			},
 			{
 				Method:         http.MethodPost,
+				Path:           "/admin/mempool",
+				Summary:        "Operator-only node-local mempool diagnostics with pending transaction summaries and best-ledger validity.",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
+				ContentType:    "application/json",
+				ResponseFields: []string{"count", "transactions"},
+				UseCases:       []string{"debug stale mempool entries", "compare node-local pending transactions", "operator diagnostics"},
+			},
+			{
+				Method:         http.MethodPost,
 				Path:           "/admin/mine",
 				Summary:        "Manually mine a requested slot; intended for controlled operations and smoke tests.",
 				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
@@ -226,6 +313,42 @@ func (s *OpsServer) endpoints(w http.ResponseWriter, r *http.Request) {
 				ContentType:    "application/json",
 				ResponseFields: []string{"hash", "to", "amount"},
 				UseCases:       []string{"validator payout", "operator rewards withdrawal"},
+			},
+			{
+				Method:         http.MethodPost,
+				Path:           "/admin/nft/mint",
+				Summary:        "Admin-only native NFT mint into a target owner account.",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
+				ContentType:    "application/json",
+				ResponseFields: []string{"hash", "collectionId", "tokenId", "owner", "metadataUri", "metadataHash", "imageUri"},
+				UseCases:       []string{"Card Vault minting", "collection issuance", "metadata anchoring"},
+			},
+			{
+				Method:         http.MethodPost,
+				Path:           "/admin/nft/transfer",
+				Summary:        "Admin-only native NFT transfer from the validator-owned token inventory.",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
+				ContentType:    "application/json",
+				ResponseFields: []string{"hash", "collectionId", "tokenId", "to"},
+				UseCases:       []string{"operator inventory transfer", "custodial Card Vault delivery"},
+			},
+			{
+				Method:         http.MethodPost,
+				Path:           "/admin/swap/pools",
+				Summary:        "Admin-only native PokoinSwap pool creation.",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
+				ContentType:    "application/json",
+				ResponseFields: []string{"hash", "poolId", "assetA", "assetB"},
+				UseCases:       []string{"PKN/wPKN pool setup", "operator liquidity initialization"},
+			},
+			{
+				Method:         http.MethodPost,
+				Path:           "/admin/swap/liquidity/add",
+				Summary:        "Admin-only native PokoinSwap liquidity addition.",
+				Authentication: "Authorization: Bearer <POKOINPOS_OPERATOR_TOKEN>",
+				ContentType:    "application/json",
+				ResponseFields: []string{"hash", "poolId", "amountA", "amountB"},
+				UseCases:       []string{"reserve seeding", "operator liquidity management"},
 			},
 			{
 				Method:         http.MethodGet,
@@ -311,7 +434,7 @@ func setRPCHeaders(w http.ResponseWriter) {
 func (s *OpsServer) handleRPC(req JSONRPCRequest) (any, *JSONRPCError) {
 	switch req.Method {
 	case "web3_clientVersion":
-		return "PokoinPoS/v0.1.0", nil
+		return nodeVersion, nil
 	case "net_version":
 		return s.evmNetworkID, nil
 	case "eth_chainId":
@@ -352,7 +475,29 @@ func (s *OpsServer) handleRPC(req JSONRPCRequest) (any, *JSONRPCError) {
 		}
 		return hexQuantity(new(big.Int).SetUint64(nonce)), nil
 	case "eth_getCode":
-		return "0x", nil
+		if len(req.Params) < 1 {
+			return nil, &JSONRPCError{Code: -32602, Message: "eth_getCode requires address"}
+		}
+		var address string
+		if err := json.Unmarshal(req.Params[0], &address); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid address"}
+		}
+		return "0x" + common.Bytes2Hex(s.peer.BestEVMCode(address)), nil
+	case "eth_getStorageAt":
+		if len(req.Params) < 2 {
+			return nil, &JSONRPCError{Code: -32602, Message: "eth_getStorageAt requires address and slot"}
+		}
+		var address string
+		var slot string
+		if err := json.Unmarshal(req.Params[0], &address); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid address"}
+		}
+		if err := json.Unmarshal(req.Params[1], &slot); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid slot"}
+		}
+		return s.peer.BestEVMStorage(address, common.HexToHash(slot).Hex()), nil
+	case "eth_call":
+		return s.evmCall(req.Params)
 	case "eth_getBlockByNumber":
 		tag := "latest"
 		if len(req.Params) > 0 {
@@ -463,6 +608,21 @@ func (s *OpsServer) handleRPC(req JSONRPCRequest) (any, *JSONRPCError) {
 		if blockHash == "" {
 			return nil, nil
 		}
+		receipt, hasReceipt := s.peer.EVMReceipt(tx.ID)
+		var contractAddress any
+		gasUsed := uint64(21_000)
+		logs := []any{}
+		if hasReceipt {
+			gasUsed = receipt.GasUsed
+			if receipt.ContractAddress != "" {
+				contractAddress = receipt.ContractAddress
+			}
+			logs = evmReceiptLogs(receipt, tx.ID, blockHash, blockNumber, txIndex)
+		} else if tx.Raw != "" {
+			if decoded, err := tx.DecodeEVMForRPC(); err == nil && decoded.To() == nil {
+				contractAddress = strings.ToLower(crypto.CreateAddress(common.HexToAddress(tx.From), tx.Nonce).Hex())
+			}
+		}
 		return map[string]any{
 			"transactionHash":   tx.ID,
 			"transactionIndex":  hexQuantity(new(big.Int).SetUint64(txIndex)),
@@ -470,10 +630,10 @@ func (s *OpsServer) handleRPC(req JSONRPCRequest) (any, *JSONRPCError) {
 			"blockNumber":       hexQuantity(big.NewInt(int64(blockNumber))),
 			"from":              tx.From,
 			"to":                tx.To,
-			"cumulativeGasUsed": "0x5208",
-			"gasUsed":           "0x5208",
-			"contractAddress":   nil,
-			"logs":              []any{},
+			"cumulativeGasUsed": hexQuantity(new(big.Int).SetUint64(gasUsed)),
+			"gasUsed":           hexQuantity(new(big.Int).SetUint64(gasUsed)),
+			"contractAddress":   contractAddress,
+			"logs":              logs,
 			"status":            "0x1",
 		}, nil
 	case "eth_mining":
@@ -483,7 +643,9 @@ func (s *OpsServer) handleRPC(req JSONRPCRequest) (any, *JSONRPCError) {
 	case "eth_gasPrice", "eth_maxPriorityFeePerGas":
 		return evmGasPrice(), nil
 	case "eth_estimateGas":
-		return "0x5208", nil
+		return s.evmEstimateGas(req.Params)
+	case "eth_getLogs":
+		return s.evmGetLogs(req.Params)
 	case "eth_feeHistory":
 		return s.evmFeeHistory(req.Params), nil
 	case "eth_sendRawTransaction":
@@ -529,6 +691,12 @@ func evmTransactionObject(tx account.SignedTransaction, blockHash string, blockN
 		blockNumberValue = hexQuantity(big.NewInt(int64(blockNumber)))
 		transactionIndexValue = hexQuantity(new(big.Int).SetUint64(txIndex))
 	}
+	input := "0x"
+	if tx.Raw != "" {
+		if decoded, err := tx.DecodeEVMForRPC(); err == nil {
+			input = "0x" + fmt.Sprintf("%x", decoded.Data())
+		}
+	}
 	return map[string]any{
 		"hash":             tx.ID,
 		"nonce":            hexQuantity(new(big.Int).SetUint64(tx.Nonce)),
@@ -540,8 +708,114 @@ func evmTransactionObject(tx account.SignedTransaction, blockHash string, blockN
 		"value":            hexQuantity(pkToEVMValue(tx.Amount)),
 		"gas":              "0x5208",
 		"gasPrice":         evmGasPrice(),
-		"input":            "0x",
+		"input":            input,
 	}
+}
+
+func (s *OpsServer) evmCall(params []json.RawMessage) (any, *JSONRPCError) {
+	if len(params) < 1 {
+		return nil, &JSONRPCError{Code: -32602, Message: "eth_call requires call object"}
+	}
+	var call map[string]any
+	if err := json.Unmarshal(params[0], &call); err != nil {
+		return nil, &JSONRPCError{Code: -32602, Message: "invalid call object"}
+	}
+	to, _ := call["to"].(string)
+	if to == "" {
+		return nil, &JSONRPCError{Code: -32602, Message: "eth_call requires to"}
+	}
+	from, _ := call["from"].(string)
+	if from == "" {
+		from = "0x0000000000000000000000000000000000000000"
+	}
+	data, _ := call["data"].(string)
+	if data == "" {
+		data, _ = call["input"].(string)
+	}
+	ret, ok := s.peer.BestEVMCall(from, to, common.FromHex(data))
+	if !ok {
+		return nil, &JSONRPCError{Code: -32000, Message: "evm call reverted"}
+	}
+	return "0x" + common.Bytes2Hex(ret), nil
+}
+
+func evmReceiptLogs(receipt account.EVMReceipt, txHash string, blockHash string, blockNumber int, txIndex uint64) []any {
+	logs := make([]any, 0, len(receipt.Logs))
+	for i, log := range receipt.Logs {
+		logs = append(logs, map[string]any{
+			"address":          log.Address,
+			"topics":           log.Topics,
+			"data":             log.Data,
+			"blockNumber":      hexQuantity(big.NewInt(int64(blockNumber))),
+			"transactionHash":  txHash,
+			"transactionIndex": hexQuantity(new(big.Int).SetUint64(txIndex)),
+			"blockHash":        blockHash,
+			"logIndex":         hexQuantity(big.NewInt(int64(i))),
+			"removed":          false,
+		})
+	}
+	return logs
+}
+
+func (s *OpsServer) evmEstimateGas(params []json.RawMessage) (any, *JSONRPCError) {
+	if len(params) < 1 {
+		return "0x5208", nil
+	}
+	var call map[string]any
+	if err := json.Unmarshal(params[0], &call); err != nil {
+		return nil, &JSONRPCError{Code: -32602, Message: "invalid call object"}
+	}
+	data, _ := call["data"].(string)
+	if data == "" {
+		data, _ = call["input"].(string)
+	}
+	if data != "" && data != "0x" {
+		return hexQuantity(big.NewInt(5_000_000)), nil
+	}
+	return "0x5208", nil
+}
+
+func (s *OpsServer) evmGetLogs(params []json.RawMessage) (any, *JSONRPCError) {
+	filter := map[string]any{}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params[0], &filter); err != nil {
+			return nil, &JSONRPCError{Code: -32602, Message: "invalid log filter"}
+		}
+	}
+	addressFilter := map[string]bool{}
+	switch raw := filter["address"].(type) {
+	case string:
+		addressFilter[strings.ToLower(raw)] = true
+	case []any:
+		for _, item := range raw {
+			if address, ok := item.(string); ok {
+				addressFilter[strings.ToLower(address)] = true
+			}
+		}
+	}
+	idx := BuildExplorerIndex(s.peer)
+	out := []any{}
+	for _, tx := range idx.TxsByHash {
+		receipt, ok := s.peer.EVMReceipt(tx.Hash)
+		if !ok {
+			continue
+		}
+		logs := evmReceiptLogs(receipt, tx.Hash, tx.BlockHash, tx.BlockNumber, uint64(tx.TransactionIndex))
+		for _, rawLog := range logs {
+			log, ok := rawLog.(map[string]any)
+			if !ok {
+				continue
+			}
+			if len(addressFilter) > 0 {
+				address, _ := log["address"].(string)
+				if !addressFilter[strings.ToLower(address)] {
+					continue
+				}
+			}
+			out = append(out, log)
+		}
+	}
+	return out, nil
 }
 
 func (s *OpsServer) evmBlockObject(tag string, includeTxs bool) any {
@@ -870,6 +1144,7 @@ func (s *OpsServer) health(w http.ResponseWriter, r *http.Request) {
 	}
 	body := map[string]any{
 		"status":          "ok",
+		"version":         nodeVersion,
 		"currencySymbol":  "PKN",
 		"peerCount":       s.peer.PeerCount(),
 		"chainHeight":     s.peer.ChainHeight(),
@@ -910,23 +1185,267 @@ func (s *OpsServer) chainStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
 		return
 	}
+	idx := BuildExplorerIndex(s.peer)
+	latest := idx.BlocksByNumber[idx.LatestHeight]
+	avgSlots := s.peer.AverageRecentBlockSlots(32)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"currencySymbol":  "PKN",
-		"height":          s.peer.ChainHeight(),
-		"committedHeight": s.peer.CommittedHeight(),
-		"finalityDepth":   s.peer.FinalityDepth(),
-		"peerCount":       s.peer.PeerCount(),
-		"mempoolDepth":    s.peer.MempoolSize(),
-		"validatorStake":  s.peer.ValidatorStake(),
-		"txCount":         s.peer.TxHistoryCount(),
-		"acceptedBlocks":  s.peer.AcceptedBlocks(),
-		"minedBlocks":     s.peer.MinedBlocks(),
-		"lotteryAttempts": s.peer.LotteryAttempts(),
-		"lotteryWins":     s.peer.LotteryWins(),
-		"lotteryMisses":   s.peer.LotteryMisses(),
-		"lotteryNoTicket": s.peer.LotteryNoTicket(),
-		"uptimeSeconds":   s.peer.UptimeSeconds(),
+		"version":           nodeVersion,
+		"currencySymbol":    "PKN",
+		"currencyName":      "Pokoin",
+		"decimals":          18,
+		"chainId":           s.evmChainID,
+		"networkId":         s.evmNetworkID,
+		"height":            s.peer.ChainHeight(),
+		"committedHeight":   s.peer.CommittedHeight(),
+		"finalityDepth":     s.peer.FinalityDepth(),
+		"latestBlockHash":   latest.Hash,
+		"latestBlockSlot":   latest.Slot,
+		"averageBlockSlots": avgSlots,
+		"peerCount":         s.peer.PeerCount(),
+		"mempoolDepth":      s.peer.MempoolSize(),
+		"validatorStake":    s.peer.ValidatorStake(),
+		"txCount":           s.peer.TxHistoryCount(),
+		"acceptedBlocks":    s.peer.AcceptedBlocks(),
+		"minedBlocks":       s.peer.MinedBlocks(),
+		"lotteryAttempts":   s.peer.LotteryAttempts(),
+		"lotteryWins":       s.peer.LotteryWins(),
+		"lotteryMisses":     s.peer.LotteryMisses(),
+		"lotteryNoTicket":   s.peer.LotteryNoTicket(),
+		"uptimeSeconds":     s.peer.UptimeSeconds(),
 	})
+}
+
+func (s *OpsServer) chainInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	idx := BuildExplorerIndex(s.peer)
+	latest := idx.BlocksByNumber[idx.LatestHeight]
+	supply := s.peer.SupplySnapshot(s.reservedSupplyAddresses)
+	validators := s.peer.ActiveAuthorizedPeers()
+	avgSlots := s.peer.AverageRecentBlockSlots(32)
+	body := map[string]any{
+		"network": map[string]any{
+			"name":             "PokoinPoS",
+			"shortName":        "pokoinpos",
+			"chainId":          s.evmChainID,
+			"networkId":        s.evmNetworkID,
+			"slip44":           60,
+			"networkType":      "permissioned-proof-of-stake",
+			"environment":      "mainnet",
+			"public":           true,
+			"evmCompatible":    true,
+			"consensus":        "permissioned-pos",
+			"clientVersion":    nodeVersion,
+			"nativeAsset":      "PKN",
+			"canonicalRpcPath": "/rpc",
+		},
+		"nativeCurrency": map[string]any{
+			"name":     "Pokoin",
+			"symbol":   "PKN",
+			"decimals": 18,
+		},
+		"rpc": map[string]any{
+			"http":        "https://rpc.pokoin.com/rpc",
+			"chainIdHex":  hexQuantity(big.NewInt(s.evmChainID)),
+			"gasPriceWei": evmGasPrice(),
+			"gasLimit":    evmGasLimit(),
+		},
+		"explorer": map[string]any{
+			"baseUrl":          "https://explorer.pokoin.com",
+			"blocksPath":       "/explorer/blocks",
+			"transactionsPath": "/explorer/tx/{hash}",
+			"addressesPath":    "/explorer/address/{address}",
+		},
+		"status": map[string]any{
+			"ready":             s.peer.Ready(),
+			"height":            s.peer.ChainHeight(),
+			"committedHeight":   s.peer.CommittedHeight(),
+			"finalityDepth":     s.peer.FinalityDepth(),
+			"peerCount":         s.peer.PeerCount(),
+			"mempoolDepth":      s.peer.MempoolSize(),
+			"txCount":           s.peer.TxHistoryCount(),
+			"uptimeSeconds":     s.peer.UptimeSeconds(),
+			"averageBlockSlots": avgSlots,
+		},
+		"supply": supply,
+		"consensus": map[string]any{
+			"type":                    "permissioned-proof-of-stake",
+			"slotSeconds":             1,
+			"finalityDepth":           s.peer.FinalityDepth(),
+			"validatorCount":          len(validators),
+			"connectedValidatorCount": len(validators),
+			"blockReward":             account.MINER_BLOCK_REWARD,
+		},
+		"latestBlock": latest,
+		"validators":  validators,
+		"integrations": map[string]any{
+			"totalSupplyText":       "https://rpc.pokoin.com/chain/supply/total.txt",
+			"circulatingSupplyText": "https://rpc.pokoin.com/chain/supply/circulating.txt",
+			"prometheusMetrics":     "https://rpc.pokoin.com/metrics",
+			"endpointCatalog":       "https://rpc.pokoin.com/endpoints",
+		},
+	}
+	writeJSONAny(w, http.StatusOK, body)
+}
+
+func (s *OpsServer) chainSupply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	writeJSONAny(w, http.StatusOK, s.peer.SupplySnapshot(s.reservedSupplyAddresses))
+}
+
+func (s *OpsServer) totalSupplyText(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	s.writeSupplyText(w, s.peer.SupplySnapshot(s.reservedSupplyAddresses).TotalSupply)
+}
+
+func (s *OpsServer) circulatingSupplyText(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	s.writeSupplyText(w, s.peer.SupplySnapshot(s.reservedSupplyAddresses).CirculatingSupply)
+}
+
+func (s *OpsServer) chainNFTs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/chain/nfts"), "/")
+	if strings.HasPrefix(path, "owner/") {
+		owner := strings.TrimPrefix(path, "owner/")
+		tokens := s.peer.BestNFTsByOwner(owner)
+		sortNFTTokens(tokens)
+		writeJSONAny(w, http.StatusOK, map[string]any{"owner": owner, "count": len(tokens), "tokens": tokens})
+		return
+	}
+	if path != "" {
+		parts := strings.Split(path, "/")
+		if len(parts) != 2 {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "nft_not_found"})
+			return
+		}
+		token, exists := s.peer.BestNFT(parts[0], parts[1])
+		if !exists || token.Burned {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "nft_not_found"})
+			return
+		}
+		writeJSONAny(w, http.StatusOK, token)
+		return
+	}
+	owner := strings.TrimSpace(r.URL.Query().Get("owner"))
+	if owner != "" {
+		tokens := s.peer.BestNFTsByOwner(owner)
+		sortNFTTokens(tokens)
+		writeJSONAny(w, http.StatusOK, map[string]any{"owner": owner, "count": len(tokens), "tokens": tokens})
+		return
+	}
+	tokens := make([]account.NFTToken, 0)
+	for _, token := range s.peer.BestNFTs() {
+		if !token.Burned {
+			tokens = append(tokens, token)
+		}
+	}
+	sortNFTTokens(tokens)
+	writeJSONAny(w, http.StatusOK, map[string]any{"count": len(tokens), "tokens": tokens})
+}
+
+func sortNFTTokens(tokens []account.NFTToken) {
+	sort.Slice(tokens, func(i, j int) bool {
+		if tokens[i].CollectionID == tokens[j].CollectionID {
+			return tokens[i].TokenID < tokens[j].TokenID
+		}
+		return tokens[i].CollectionID < tokens[j].CollectionID
+	})
+}
+
+func (s *OpsServer) swapPools(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/chain/swap/pools"), "/")
+	if path != "" {
+		pool, exists := s.peer.BestAMMPool(path)
+		if !exists {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "pool_not_found"})
+			return
+		}
+		writeJSONAny(w, http.StatusOK, pool)
+		return
+	}
+	pools := make([]account.AMMPool, 0)
+	for _, pool := range s.peer.BestAMMPools() {
+		pools = append(pools, pool)
+	}
+	sort.Slice(pools, func(i, j int) bool { return pools[i].ID < pools[j].ID })
+	writeJSONAny(w, http.StatusOK, map[string]any{"count": len(pools), "pools": pools})
+}
+
+func (s *OpsServer) swapBalances(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	address := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/chain/swap/balances/"))
+	if address == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing_address"})
+		return
+	}
+	writeJSONAny(w, http.StatusOK, map[string]any{"address": address, "balances": s.peer.BestAssetBalances(address)})
+}
+
+func (s *OpsServer) swapQuote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	poolID := strings.TrimSpace(r.URL.Query().Get("pool"))
+	assetIn := strings.TrimSpace(r.URL.Query().Get("assetIn"))
+	amountIn := queryInt(r, "amountIn", 0)
+	pool, exists := s.peer.BestAMMPool(poolID)
+	if !exists || amountIn < 1 || assetIn == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_quote_request"})
+		return
+	}
+	amountOut, ok := account.QuoteSwap(pool, assetIn, amountIn)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "quote_unavailable"})
+		return
+	}
+	assetIn = strings.ToUpper(assetIn)
+	assetOut := pool.AssetB
+	reserveIn, reserveOut := pool.ReserveA, pool.ReserveB
+	if assetIn == pool.AssetB {
+		assetOut = pool.AssetA
+		reserveIn, reserveOut = pool.ReserveB, pool.ReserveA
+	}
+	writeJSONAny(w, http.StatusOK, account.AMMQuote{
+		PoolID:           pool.ID,
+		AssetIn:          assetIn,
+		AssetOut:         assetOut,
+		AmountIn:         amountIn,
+		AmountOut:        amountOut,
+		FeeBps:           pool.FeeBps,
+		ReserveIn:        reserveIn,
+		ReserveOut:       reserveOut,
+		PriceNumerator:   reserveOut,
+		PriceDenominator: reserveIn,
+	})
+}
+
+func (s *OpsServer) writeSupplyText(w http.ResponseWriter, value int) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(strconv.Itoa(value)))
 }
 
 func (s *OpsServer) validators(w http.ResponseWriter, r *http.Request) {
@@ -956,13 +1475,22 @@ func (s *OpsServer) metrics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
 		return
 	}
+	supply := s.peer.SupplySnapshot(s.reservedSupplyAddresses)
+	activeValidators := s.peer.ActiveAuthorizedPeers()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	fmt.Fprintf(w, "pokoinpos_chain_id %d\n", s.evmChainID)
 	fmt.Fprintf(w, "pokoinpos_chain_height %d\n", s.peer.ChainHeight())
 	fmt.Fprintf(w, "pokoinpos_committed_height %d\n", s.peer.CommittedHeight())
 	fmt.Fprintf(w, "pokoinpos_finality_depth %d\n", s.peer.FinalityDepth())
 	fmt.Fprintf(w, "pokoinpos_peer_count %d\n", s.peer.PeerCount())
 	fmt.Fprintf(w, "pokoinpos_mempool_depth %d\n", s.peer.MempoolSize())
 	fmt.Fprintf(w, "pokoinpos_validator_stake %d\n", s.peer.ValidatorStake())
+	fmt.Fprintf(w, "pokoinpos_validator_count %d\n", len(activeValidators))
+	fmt.Fprintf(w, "pokoinpos_connected_validator_count %d\n", len(activeValidators))
+	fmt.Fprintf(w, "pokoinpos_total_supply %d\n", supply.TotalSupply)
+	fmt.Fprintf(w, "pokoinpos_circulating_supply %d\n", supply.CirculatingSupply)
+	fmt.Fprintf(w, "pokoinpos_reserved_supply %d\n", supply.ReservedSupply)
+	fmt.Fprintf(w, "pokoinpos_average_block_slots %d\n", s.peer.AverageRecentBlockSlots(32))
 	fmt.Fprintf(w, "pokoinpos_blocks_accepted_total %d\n", s.peer.AcceptedBlocks())
 	fmt.Fprintf(w, "pokoinpos_blocks_mined_total %d\n", s.peer.MinedBlocks())
 	fmt.Fprintf(w, "pokoinpos_lottery_attempts_total %d\n", s.peer.LotteryAttempts())
@@ -995,6 +1523,22 @@ func (s *OpsServer) mineSlot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *OpsServer) adminMempool(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	if !s.isAdminAuthorized(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "admin_auth_required"})
+		return
+	}
+	txs := s.peer.MempoolSummaries()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":        len(txs),
+		"transactions": txs,
+	})
+}
+
 type mintRequest struct {
 	To     string `json:"to"`
 	Amount int    `json:"amount"`
@@ -1003,6 +1547,38 @@ type mintRequest struct {
 type withdrawRequest struct {
 	To     string `json:"to"`
 	Amount int    `json:"amount"`
+}
+
+type nftMintRequest struct {
+	CollectionID string `json:"collectionId"`
+	TokenID      string `json:"tokenId"`
+	Owner        string `json:"owner"`
+	MetadataURI  string `json:"metadataUri"`
+	MetadataHash string `json:"metadataHash"`
+	ImageURI     string `json:"imageUri"`
+}
+
+type nftTransferRequest struct {
+	CollectionID string `json:"collectionId"`
+	TokenID      string `json:"tokenId"`
+	To           string `json:"to"`
+}
+
+type assetAccountingRequest struct {
+	Asset   string `json:"asset"`
+	Account string `json:"account"`
+	Amount  int    `json:"amount"`
+}
+
+type swapPoolRequest struct {
+	AssetA string `json:"assetA"`
+	AssetB string `json:"assetB"`
+}
+
+type swapAddLiquidityRequest struct {
+	PoolID  string `json:"poolId"`
+	AmountA int    `json:"amountA"`
+	AmountB int    `json:"amountB"`
 }
 
 func (s *OpsServer) mint(w http.ResponseWriter, r *http.Request) {
@@ -1065,6 +1641,176 @@ func (s *OpsServer) withdraw(w http.ResponseWriter, r *http.Request) {
 		"to":     tx.To,
 		"amount": tx.Amount,
 	})
+}
+
+func (s *OpsServer) nftMint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	if !s.isAdminAuthorized(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "admin_auth_required"})
+		return
+	}
+	var req nftMintRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	req.CollectionID = strings.TrimSpace(req.CollectionID)
+	req.TokenID = strings.TrimSpace(req.TokenID)
+	req.Owner = strings.TrimSpace(req.Owner)
+	if req.CollectionID == "" || req.TokenID == "" || req.Owner == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_nft_mint_request"})
+		return
+	}
+	id := account.StableNFTTxID("mint", time.Now().UTC().Format(time.RFC3339Nano), req.CollectionID, req.TokenID, req.Owner, req.MetadataURI, req.MetadataHash, req.ImageURI)
+	tx, ok := s.peer.FloodNFTMintTransaction(id, req.CollectionID, req.TokenID, req.Owner, req.MetadataURI, req.MetadataHash, req.ImageURI)
+	if !ok || tx.NFT == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "nft_mint_failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"hash":         tx.ID,
+		"collectionId": tx.NFT.CollectionID,
+		"tokenId":      tx.NFT.TokenID,
+		"owner":        tx.NFT.Owner,
+		"metadataUri":  tx.NFT.MetadataURI,
+		"metadataHash": tx.NFT.MetadataHash,
+		"imageUri":     tx.NFT.ImageURI,
+	})
+}
+
+func (s *OpsServer) nftTransfer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	if !s.isAdminAuthorized(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "admin_auth_required"})
+		return
+	}
+	var req nftTransferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	req.CollectionID = strings.TrimSpace(req.CollectionID)
+	req.TokenID = strings.TrimSpace(req.TokenID)
+	req.To = strings.TrimSpace(req.To)
+	if req.CollectionID == "" || req.TokenID == "" || req.To == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_nft_transfer_request"})
+		return
+	}
+	id := account.StableNFTTxID("transfer", time.Now().UTC().Format(time.RFC3339Nano), req.CollectionID, req.TokenID, req.To)
+	tx, ok := s.peer.FloodNFTTransferTransaction(id, req.CollectionID, req.TokenID, req.To)
+	if !ok || tx.NFT == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "nft_transfer_failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"hash":         tx.ID,
+		"collectionId": tx.NFT.CollectionID,
+		"tokenId":      tx.NFT.TokenID,
+		"to":           tx.To,
+	})
+}
+
+func (s *OpsServer) adminAssetCredit(w http.ResponseWriter, r *http.Request) {
+	s.adminAssetAccounting(w, r, true)
+}
+
+func (s *OpsServer) adminAssetDebit(w http.ResponseWriter, r *http.Request) {
+	s.adminAssetAccounting(w, r, false)
+}
+
+func (s *OpsServer) adminAssetAccounting(w http.ResponseWriter, r *http.Request, credit bool) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	if !s.isAdminAuthorized(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "admin_auth_required"})
+		return
+	}
+	var req assetAccountingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	req.Asset = strings.TrimSpace(req.Asset)
+	req.Account = strings.TrimSpace(req.Account)
+	if req.Asset == "" || req.Account == "" || req.Amount < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_asset_request"})
+		return
+	}
+	idKind := "asset-credit"
+	var tx *account.SignedTransaction
+	var ok bool
+	if credit {
+		tx, ok = s.peer.FloodAssetCreditTransaction(fmt.Sprintf("%s-%d-%s-%s-%d", idKind, time.Now().UnixNano(), req.Asset, req.Account, req.Amount), req.Asset, req.Account, req.Amount)
+	} else {
+		idKind = "asset-debit"
+		tx, ok = s.peer.FloodAssetDebitTransaction(fmt.Sprintf("%s-%d-%s-%s-%d", idKind, time.Now().UnixNano(), req.Asset, req.Account, req.Amount), req.Asset, req.Account, req.Amount)
+	}
+	if !ok || tx.AMM == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "asset_accounting_failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"hash": tx.ID, "asset": tx.AMM.Asset, "account": tx.To, "amount": tx.AMM.Amount, "action": tx.AMM.Action})
+}
+
+func (s *OpsServer) adminSwapPool(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	if !s.isAdminAuthorized(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "admin_auth_required"})
+		return
+	}
+	var req swapPoolRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	poolID := account.PoolID(req.AssetA, req.AssetB)
+	if poolID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_pool_request"})
+		return
+	}
+	tx, ok := s.peer.FloodAMMCreatePoolTransaction(fmt.Sprintf("amm-pool-%d-%s", time.Now().UnixNano(), poolID), req.AssetA, req.AssetB)
+	if !ok || tx.AMM == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "pool_create_failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"hash": tx.ID, "poolId": tx.AMM.PoolID, "assetA": tx.AMM.AssetA, "assetB": tx.AMM.AssetB})
+}
+
+func (s *OpsServer) adminSwapAddLiquidity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method_not_allowed"})
+		return
+	}
+	if !s.isAdminAuthorized(r) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "admin_auth_required"})
+		return
+	}
+	var req swapAddLiquidityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if strings.TrimSpace(req.PoolID) == "" || req.AmountA < 1 || req.AmountB < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_liquidity_request"})
+		return
+	}
+	tx, ok := s.peer.FloodAMMAddLiquidityTransaction(fmt.Sprintf("amm-liquidity-%d-%s-%d-%d", time.Now().UnixNano(), req.PoolID, req.AmountA, req.AmountB), req.PoolID, req.AmountA, req.AmountB)
+	if !ok || tx.AMM == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "liquidity_add_failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"hash": tx.ID, "poolId": tx.AMM.PoolID, "amountA": tx.AMM.AmountA, "amountB": tx.AMM.AmountB})
 }
 
 func (s *OpsServer) isAdminAuthorized(r *http.Request) bool {

@@ -9,6 +9,7 @@ The public web experience now lives in the separate `cardvault` repository as a 
 
 This repository documents the chain side:
 
+- public website route ownership and deployment boundaries,
 - public RPC and health endpoints,
 - MetaMask-compatible JSON-RPC behavior,
 - validator/mining rules,
@@ -17,6 +18,7 @@ This repository documents the chain side:
 
 ## Contents
 
+- `website.md`: Public `pokoin.com` route map, marketplace API surface, data ownership, search/homepage behavior, and website deployment notes.
 - `api/endpoints.md`: REST API endpoints, request/response models, and webhook contracts.
 - `node-endpoints.md`: Live PokoinPoS node endpoints for health pages, monitoring, and admin smoke tests.
 - `public-network.md`: Public chain metadata, explorer/RPC URLs, and wallet-facing network values.
@@ -27,6 +29,7 @@ This repository documents the chain side:
 - `operations/security-compliance.md`: Security baseline, key management, fraud controls, and compliance requirements.
 - `operations/modern-blockchain-checklist.md`: Feature checklist for chain support, observability, reliability, and scale.
 - `operations/disaster-recovery.md`: Backup/restore procedures, RTO/RPO targets, and DR game-day workflow.
+- `operations/postgres-peer3-fallback.md`: Marketplace Postgres streaming replication, peer3 failover, and rebuild workflow.
 
 ## Versioning
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,6 +16,7 @@ type BootstrapPeerStatus struct {
 	Label             string  `json:"label"`
 	Host              string  `json:"host"`
 	Port              int     `json:"port"`
+	Version           string  `json:"version,omitempty"`
 	Status            string  `json:"status"`
 	AgeDays           int     `json:"ageDays"`
 	ExternalObservers int     `json:"externalObservers"`
@@ -27,6 +29,9 @@ type BootstrapRegistryStatus struct {
 	ManifestURL   string                `json:"manifestUrl"`
 	LastRefreshAt string                `json:"lastRefreshAt"`
 	LastError     string                `json:"lastError"`
+	Network       BootstrapNetwork      `json:"network"`
+	EVM           BootstrapEVM          `json:"evm"`
+	Bootstrap     BootstrapDefaults     `json:"bootstrap"`
 	Policy        BootstrapPolicy       `json:"policy"`
 	Peers         []BootstrapPeerStatus `json:"peers"`
 	Candidates    []BootstrapPeerStatus `json:"candidates"`
@@ -42,10 +47,34 @@ type BootstrapPolicy struct {
 	MinimumExternalObservers int     `json:"minimumExternalObservers"`
 }
 
+type BootstrapNetwork struct {
+	Name                          string `json:"name"`
+	BootstrapManifestURL          string `json:"bootstrapManifestUrl"`
+	BootstrapRefreshIntervalHours int    `json:"bootstrapRefreshIntervalHours"`
+}
+
+type BootstrapEVM struct {
+	ChainID   int64  `json:"chainId"`
+	NetworkID string `json:"networkId"`
+}
+
+type BootstrapDefaults struct {
+	FallbackPeers   []string            `json:"fallbackPeers"`
+	DefaultJoinPeer BootstrapJoinTarget `json:"defaultJoinPeer"`
+}
+
+type BootstrapJoinTarget struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
 type bootstrapManifest struct {
 	SchemaVersion int                   `json:"schemaVersion"`
 	GeneratedAt   string                `json:"generatedAt"`
 	ValidForHours int                   `json:"validForHours"`
+	Network       BootstrapNetwork      `json:"network"`
+	EVM           BootstrapEVM          `json:"evm"`
+	Bootstrap     BootstrapDefaults     `json:"bootstrap"`
 	Policy        BootstrapPolicy       `json:"policy"`
 	Peers         []BootstrapPeerStatus `json:"peers"`
 	Candidates    []BootstrapPeerStatus `json:"candidates"`
@@ -73,6 +102,29 @@ func NewBootstrapRegistry(url string, refreshHours int, fallback []PeerAddress) 
 			FallbackPeers: peerAddressStrings(fallback),
 		},
 	}
+}
+
+func FetchBootstrapManifestDefaults(ctx context.Context, url string) (bootstrapManifest, error) {
+	if strings.TrimSpace(url) == "" {
+		return bootstrapManifest{}, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return bootstrapManifest{}, err
+	}
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		return bootstrapManifest{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return bootstrapManifest{}, fmt.Errorf("manifest returned HTTP %d", resp.StatusCode)
+	}
+	var manifest bootstrapManifest
+	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+		return bootstrapManifest{}, err
+	}
+	return manifest, nil
 }
 
 func (r *BootstrapRegistry) Peers(ctx context.Context) []PeerAddress {
@@ -144,11 +196,21 @@ func (r *BootstrapRegistry) fetch(ctx context.Context) ([]BootstrapPeerStatus, e
 		return nil, err
 	}
 	r.mu.Lock()
+	r.status.Network = manifest.Network
+	r.status.EVM = manifest.EVM
+	r.status.Bootstrap = manifest.Bootstrap
 	r.status.Policy = manifest.Policy
 	r.status.Candidates = append([]BootstrapPeerStatus(nil), manifest.Candidates...)
-	r.status.FallbackPeers = append([]string(nil), manifest.FallbackPeers...)
+	r.status.FallbackPeers = append([]string(nil), manifestFallbackPeers(manifest)...)
 	r.mu.Unlock()
 	return manifest.Peers, nil
+}
+
+func manifestFallbackPeers(manifest bootstrapManifest) []string {
+	if len(manifest.Bootstrap.FallbackPeers) > 0 {
+		return manifest.Bootstrap.FallbackPeers
+	}
+	return manifest.FallbackPeers
 }
 
 func mergeBootstrapPeers(groups ...[]PeerAddress) []PeerAddress {
@@ -158,14 +220,29 @@ func mergeBootstrapPeers(groups ...[]PeerAddress) []PeerAddress {
 			if address.Host == "" || address.Port <= 0 {
 				continue
 			}
-			if address.ID == "" {
-				address.ID = strconv.Itoa(address.Port)
-			}
+			address.ID = peerID(address.Host, address.Port)
 			seen[address.Host+":"+strconv.Itoa(address.Port)] = address
 		}
 	}
 	out := make([]PeerAddress, 0, len(seen))
 	for _, address := range seen {
+		out = append(out, address)
+	}
+	return out
+}
+
+func filterSelfBootstrapPeers(addresses []PeerAddress, advertiseHost string, listenPort int) []PeerAddress {
+	out := make([]PeerAddress, 0, len(addresses))
+	selfHost := strings.ToLower(strings.TrimSpace(advertiseHost))
+	for _, address := range addresses {
+		host := strings.ToLower(strings.TrimSpace(address.Host))
+		if address.Port == listenPort && (host == selfHost || host == "127.0.0.1" || host == "localhost") {
+			logEvent("bootstrap_self_peer_skipped", map[string]any{
+				"host": address.Host,
+				"port": address.Port,
+			})
+			continue
+		}
 		out = append(out, address)
 	}
 	return out
@@ -177,11 +254,7 @@ func bootstrapStatusesToAddresses(peers []BootstrapPeerStatus) []PeerAddress {
 		if peer.Host == "" || peer.Port <= 0 {
 			continue
 		}
-		id := peer.ID
-		if id == "" {
-			id = strconv.Itoa(peer.Port)
-		}
-		out = append(out, PeerAddress{ID: id, Host: peer.Host, Port: peer.Port})
+		out = append(out, PeerAddress{ID: peerID(peer.Host, peer.Port), Host: peer.Host, Port: peer.Port})
 	}
 	return out
 }

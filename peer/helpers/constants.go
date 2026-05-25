@@ -26,3 +26,8 @@ const POS_TRANSACTION_MESSAGE_TYPE = "PoSTransaction"
 
 // Block broadcast for longest-chain ordering.
 const BLOCK_MESSAGE_TYPE = "Block"
+
+// Chain sync request/response are used when a peer joins after historical
+// blocks were loaded from persisted state and are no longer in flood memory.
+const CHAIN_SYNC_REQUEST_MESSAGE_TYPE = "ChainSyncRequest"
+const CHAIN_SYNC_RESPONSE_MESSAGE_TYPE = "ChainSyncResponse"
